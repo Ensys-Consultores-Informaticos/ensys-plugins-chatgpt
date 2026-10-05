@@ -343,6 +343,35 @@ def main() -> int:
          and round(0.125, 2) == 0.12),
     ]
 
+    # ── 2.0.7: los nombres de terceros tienen que venir tokenizados ─────────
+    from lib_eeff import exigir_tokens, nombres_en_claro
+    plan = [{"Cuenta": "40000012", "Nombre": "PROV 40000012"},      # tokenizado: bien
+            {"Cuenta": "43000001", "Nombre": "CLIENTE FICTICIO, S.A."},  # en claro: mal
+            {"Cuenta": "4100", "Nombre": ""},                         # vacio: bien
+            {"Cuenta": "400", "Nombre": "Proveedores"},               # agregada, no es de tercero
+            {"Cuenta": "70000001", "Nombre": "Ventas"}]               # no es de tercero
+    aqui = os.path.dirname(os.path.abspath(__file__))
+    fuentes = {n: io.open(os.path.join(aqui, n), encoding="utf-8").read()
+               for n in ("verificar_contrato.py", "generar_papel.py", "generar_ecpn.py", "proponer_efe.py")}
+    salida = io.StringIO()
+    _stdout, sys.stdout = sys.stdout, salida
+    try:
+        para = exigir_tokens(plan)
+        sigue_con_permiso = exigir_tokens(plan, en_claro_por_el_auditor=True)
+    finally:
+        sys.stdout = _stdout
+    pruebas += [
+        ("TOKENS · solo cuenta como en claro la cuenta de TERCERO a maximo detalle con nombre que no es token",
+         nombres_en_claro(plan) == ["43000001"]),
+        ("TOKENS · con un nombre en claro se para, y lo dice con el numero de cuenta, nunca con el nombre",
+         para is False and "43000001" in salida.getvalue() and "FICTICIO" not in salida.getvalue()),
+        ("TOKENS · solo sigue si el auditor ha apagado la tokenizacion (--nombres-en-claro)",
+         sigue_con_permiso is True),
+        ("TOKENS · los cuatro scripts que leen el plan lo comprueban antes de generar nada",
+         all("exigir_tokens(cuentas, a.nombres_en_claro)" in s and "--nombres-en-claro" in s
+             for s in fuentes.values())),
+    ]
+
     for descripcion, ok in pruebas:
         print(f"  {'OK   ' if ok else 'FALLA'}  {descripcion}")
         if not ok:

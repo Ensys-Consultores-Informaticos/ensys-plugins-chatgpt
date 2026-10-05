@@ -19,6 +19,7 @@ import argparse
 import sys
 
 from lib_eeff import (
+    exigir_tokens,
     COLUMNAS_SALDO,
     DECIMALES,
     ESTADO_BALANCE,
@@ -47,6 +48,8 @@ def main() -> int:
     p.add_argument("--estructura", required=True, help="JSON de EstructuraBalance + EstructuraPyG")
     p.add_argument("--cuentas", required=True, help="JSON del plan con su epigrafe y saldos")
     p.add_argument("--ejercicios", required=True, help="JSON de Auditorias: codigo y año")
+    p.add_argument("--nombres-en-claro", action="store_true",
+                   help="solo si el auditor ha apagado la tokenizacion: configurar dice «forzado por el auditor»")
     a = p.parse_args()
 
     errores: list = []
@@ -68,6 +71,9 @@ def main() -> int:
     if errores:
         for e in errores:
             print("❌ " + e)
+        return 2
+
+    if not exigir_tokens(cuentas, a.nombres_en_claro):
         return 2
 
     faltan = [c for c in COLUMNAS_ESTRUCTURA if c not in estructura[0]]

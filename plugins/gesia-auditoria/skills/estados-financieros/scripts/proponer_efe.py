@@ -67,6 +67,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from lib_eeff import (
+    exigir_tokens,
     TOLERANCIA,
     a_float,
     es_si,
@@ -438,10 +439,14 @@ def main() -> int:
     p.add_argument("--cliente", required=True)
     p.add_argument("--ejercicio", default="")
     p.add_argument("--salida", required=True)
+    p.add_argument("--nombres-en-claro", action="store_true",
+                   help="solo si el auditor ha apagado la tokenizacion: configurar dice «forzado por el auditor»")
     a = p.parse_args()
 
     catalogo = leer_json(a.catalogo)
     cuentas = leer_json(a.cuentas)
+    if not exigir_tokens(cuentas, a.nombres_en_claro):
+        return 2
     cuadro = leer_json(a.cuadro)
 
     if not cuadro:

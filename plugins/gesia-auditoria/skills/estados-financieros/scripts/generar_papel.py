@@ -44,6 +44,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
 from lib_eeff import (
+    exigir_tokens,
     DECIMALES,
     ajustes_sin_epigrafe,
     ESTADO_BALANCE,
@@ -308,10 +309,14 @@ def main() -> int:
     p.add_argument("--cliente", required=True)
     p.add_argument("--ejercicio", default="")
     p.add_argument("--salida", required=True)
+    p.add_argument("--nombres-en-claro", action="store_true",
+                   help="solo si el auditor ha apagado la tokenizacion: configurar dice «forzado por el auditor»")
     a = p.parse_args()
 
     estructura = leer_json(a.estructura)
     cuentas = leer_json(a.cuentas)
+    if not exigir_tokens(cuentas, a.nombres_en_claro):
+        return 2
     anios = ejercicios(leer_json(a.ejercicios))
 
     cols = [i for i in range(1, 6) if any(abs(saldo(f, i)) > 0 for f in estructura)]

@@ -83,7 +83,20 @@ del expediente sin pasos intermedios.
 
 ### Paso 1 — Expediente
 
-`configurar()` sin parámetros para ver el estado. Si no hay expediente, pide la ruta del
+```
+configurar(perfil = "estados-financieros")   # primero: nombres de terceros tokenizados
+```
+
+**Lo primero, antes de exportar nada: el perfil.** Con él, el MCP **tokeniza los nombres de
+terceros** en todo lo que exporta: en `cuentas.json` las cuentas de proveedores y clientes
+salen como `PROV 40000012` o `CLI 43000007` en vez de su razón social, y el papel los recupera
+al final con `rehidratar`. Trabaja y habla por cuenta y por token; **nunca preguntes al auditor
+a quién corresponde un token ni lo adivines**. Si un script para con «NOMBRE EN CLARO», faltó
+el perfil: ponlo, borra lo exportado con `limpiar_exportaciones()` y repite la exportación. Solo
+si `configurar()` dice `nombres_terceros: en claro — forzado por el auditor`, lo ha apagado él:
+entonces pasa `--nombres-en-claro` a los scripts, y no lo vuelvas a encender tú.
+
+`configurar()` te devuelve además el estado. Si no hay expediente, pide la ruta del
 `.gs3`. Si responde que el servidor API no contesta, **llama a `arrancar_api`**: lo levanta en
 el equipo del auditor y sigues. No le pidas a él que lo arranque a mano.
 
@@ -398,6 +411,17 @@ Y una advertencia que va siempre: **el papel es una lectura del expediente, no u
 Que los epígrafes cuadren no dice que las cuentas sean correctas, dice que el expediente es
 internamente consistente.
 
+**Los nombres.** Los papeles se han escrito con tokens. Cuando cada uno esté ya en el disco del
+auditor, llama a `rehidratar(ruta = "<expediente>/AsistenteIA/EstadosFinancieros/<fichero>",
+leyenda = true)`: sustituye cada token por el nombre real, en local, y devuelve recuentos —ni un
+nombre vuelve aquí—. Hazlo con **todos** los que hayan salido; el de flujos puede no llevar
+ninguno, y eso no es un fallo. Cuéntale al auditor las sustituciones y los terceros distintos
+de cada papel y, si hay `tokens_sin_nombre`, dilos tal cual. Delante de él no lo llames
+«rehidratar»: para él es **desanonimizar**.**Aquí el papel es uno solo**: el del expediente. No hay copia de chat ni contenedor por el que viajar, así que en cuanto lo desanonimizas lleva los nombres reales en el disco del auditor. Dilo tal cual, para que sepa que ese fichero ya no es anónimo y trate el sitio donde lo deje en consecuencia.
+
+**Los temporales.** Lo que haya escrito `exportar_consulta` lo borra `limpiar_exportaciones()`:
+funciona igual en local y en Cowork, porque lo borra el MCP en el equipo del auditor.
+
 ---
 
 ## Lo que este skill no hace
@@ -434,6 +458,7 @@ internamente consistente.
 | Situación | Qué hace |
 |---|---|
 | El servidor API no responde | llama a `arrancar_api` y repite; solo si eso falla, se lo dice al auditor |
+| Un script para con «NOMBRE EN CLARO» | faltó el perfil: `configurar(perfil = "estados-financieros")`, `limpiar_exportaciones()` y exportar de nuevo |
 | El expediente no tiene cifras cargadas en ningún ejercicio | **para**: no hay nada que revisar |
 | El balance descuadra en algún ejercicio | **para**: con un balance descuadrado no se emite papel, y se dice en qué ejercicio y por cuánto |
 | Los epígrafes de las cuentas no existen en la estructura | **para**: el mapeo no es de este modelo de cuentas |

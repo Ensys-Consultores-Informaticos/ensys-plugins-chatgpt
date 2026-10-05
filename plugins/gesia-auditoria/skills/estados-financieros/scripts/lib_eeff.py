@@ -92,6 +92,41 @@ def texto(v) -> str:
     return "" if v is None else str(v).strip()
 
 
+# ── los nombres de terceros tienen que venir tokenizados ─────────────────────
+# Misma regla que el MCP (_es_cuenta_tercero): cuenta de tercero a maximo detalle. El
+# 05/10/2026, en Cowork, la sesion exporto el plan sin perfil -los nombres de proveedores y
+# clientes en claro- a una carpeta del expediente en OneDrive. Desde la 2.0.7 el skill pone el
+# perfil `estados-financieros`, que los tokeniza, y estos scripts se niegan a trabajar con un
+# plan que los traiga en claro: si alguien se salta el perfil, no sale ningun papel.
+GRUPOS_TERCERO = ("40", "41", "43", "44", "46", "47", "55", "64")
+_RE_TOKEN = re.compile(r"^(?:PROV|CLI|TER) \S+$")
+
+
+def nombres_en_claro(cuentas) -> list:
+    """Las cuentas de tercero cuyo nombre NO viene como token (PROV/CLI/TER + cuenta)."""
+    malas = []
+    for c in cuentas or []:
+        cuenta, nombre = texto(c.get("Cuenta")), texto(c.get("Nombre"))
+        if (len(cuenta) > 3 and cuenta.isdigit() and cuenta[:2] in GRUPOS_TERCERO
+                and nombre and not _RE_TOKEN.match(nombre)):
+            malas.append(cuenta)
+    return malas
+
+
+def exigir_tokens(cuentas, en_claro_por_el_auditor: bool = False) -> bool:
+    """True si se puede seguir. Si no, lo dice -con el numero de cuenta, nunca el nombre-."""
+    malas = nombres_en_claro(cuentas)
+    if not malas or en_claro_por_el_auditor:
+        return True
+    print(f"❌ {len(malas)} cuentas de tercero traen el NOMBRE EN CLARO (la primera, la {malas[0]}). "
+          "Falta configurar(perfil = \"estados-financieros\") ANTES de exportar: el perfil los "
+          "tokeniza y el papel los recupera al final con rehidratar. Vuelve a exportar el plan con el "
+          "perfil puesto y repite; no muevas este fichero a ningun sitio, y borralo con "
+          "limpiar_exportaciones(). Solo si el auditor ha apagado él la tokenización "
+          "(configurar dice «forzado por el auditor») se sigue, con --nombres-en-claro. No se genera nada.")
+    return False
+
+
 def ejercicios(filas_auditorias: list) -> dict:
     """{'1': '2025', '2': '2024', ...}. Sin esto no se puede etiquetar ninguna columna."""
     res = {}
