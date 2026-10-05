@@ -24,7 +24,7 @@ importe, y el auditor comprueba en cada uno **cuánto vale de verdad**. De la di
 entre lo contabilizado y lo que sostiene el documento sale el error, y ForSampling lo
 proyecta a la población. Este skill hace la parte de mirar el documento y medir.
 
-Los ficheros se escriben en `<expediente>\InformesGesia\FspMum\` y **nunca se publican**
+Los ficheros se escriben en `<expediente>\AsistenteIA\FspMum\` y **nunca se publican**
 en ninguna URL: llevan la contabilidad de un cliente auditado. `<expediente>` es **la carpeta
 del fichero configurado**: la del `.gs3`, o la del `.cli` cuando se trabaja solo con
 ForSampling, sin expediente de Gesia. Es la misma que usa el MCP para su registro.
@@ -508,7 +508,7 @@ sin base imponible legible, documentos sin fecha legible) se perdieron por el ca
 Imprime, además, el término con el que compara esta población, los elementos con diferencia
 y, si había evaluación, el recuento frente al auditor. **Lee esa salida antes de entregar.**
 
-Pásale a `--salida` la ruta del expediente directamente: el script crea el árbol `InformesGesia`. Si el expediente está en OneDrive, el entorno puede pedir autorización antes de escribir: pídesela al usuario y repite.
+Pásale a `--salida` la ruta del expediente directamente: el script crea el árbol `AsistenteIA`. Si el expediente está en OneDrive, el entorno puede pedir autorización antes de escribir: pídesela al usuario y repite.
 
 ### Paso 5 — Entregar
 
@@ -527,7 +527,7 @@ Si había evaluación del auditor, traslada las cifras de la comparación. La qu
 
 **Los nombres.** El papel se ha escrito con tokens en las columnas de la muestra (la columna del
 documento leído, `Proveedores`, lleva lo que decía la factura). Cuando ya esté en el disco del
-auditor, llama a `rehidratar(ruta = "<expediente>/InformesGesia/FspMum/<fichero>",
+auditor, llama a `rehidratar(ruta = "<expediente>/AsistenteIA/FspMum/<fichero>",
 leyenda = true)`: sustituye cada token por el nombre real, en local, y devuelve recuentos —ni un
 nombre vuelve aquí—. Con `leyenda = true` añade la hoja «Tokens» con la equivalencia, para que
 lo que has dicho en el chat con tokens se pueda leer en el papel. **Cuéntale al auditor los dos
@@ -537,7 +537,7 @@ del apunte, que el diccionario guardó al tokenizar.
 
 Sin llamar «rehidratar» a nada delante del auditor —para él es **desanonimizar**—:
 
-> *Papel generado y archivado en el expediente: `InformesGesia\FspMum\<fichero>`. Nombres ya desanonimizados: N
+> *Papel generado y archivado en el expediente: `AsistenteIA\FspMum\<fichero>`. Nombres ya desanonimizados: N
 > sustituciones, M terceros distintos, ninguno sin nombre, y hoja «Tokens» con la leyenda. Los
 > temporales están borrados.*
 

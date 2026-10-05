@@ -3,7 +3,7 @@
 
     python generar_papel.py --estructura estructura.json --cuentas cuentas.json
         --ejercicios ejercicios.json --cliente "..." --ejercicio 2025
-        --salida "<expediente>/InformesGesia/EstadosFinancieros/Estados Financieros <CLIENTE> <EJERCICIO>.xlsx"
+        --salida "<expediente>/AsistenteIA/EstadosFinancieros/Estados Financieros <CLIENTE> <EJERCICIO>.xlsx"
 
 Cinco hojas, y ninguna mas:
 

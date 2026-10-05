@@ -1,7 +1,7 @@
 """Escribe el papel de trabajo de continuidad de saldos en Excel.
 
     python generar_papel.py --resultado resultado.json \
-        --fecha-cierre 31/12/25 --salida "<expediente>/InformesGesia/..."
+        --fecha-cierre 31/12/25 --salida "<expediente>/AsistenteIA/..."
 
 El formato reproduce el papel que el auditor hacia a mano (el AG)02-02 del
 ejercicio anterior): cabecera con cliente, ejercicio, titulo y fuente; el bloque de

@@ -2,7 +2,7 @@
 
     python ejecutar_mum.py --muestra muestra.json --parametros parametros.json \
         --facturas facturas.json [--evaluacion evaluacion.json] \
-        --salida "<expediente>/InformesGesia/FspMum/MUM <PRUEBA> <CLIENTE> <EJERCICIO>.xlsx" \
+        --salida "<expediente>/AsistenteIA/FspMum/MUM <PRUEBA> <CLIENTE> <EJERCICIO>.xlsx" \
         --generado 2026-09-03
 
 Es lo que hacen los dos scripts de debajo, en una sola llamada:

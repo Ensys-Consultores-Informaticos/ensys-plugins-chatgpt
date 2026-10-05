@@ -2,7 +2,7 @@
 
     python generar_papel.py --muestra muestra.json --parametros parametros.json \
         --facturas facturas.json [--evaluacion evaluacion.json] \
-        --salida "<expediente>/InformesGesia/FspMum/MUM <PRUEBA> <CLIENTE> <EJERCICIO>.xlsx" \
+        --salida "<expediente>/AsistenteIA/FspMum/MUM <PRUEBA> <CLIENTE> <EJERCICIO>.xlsx" \
         --generado 2026-09-03
 
 Una sola hoja, «Analisis muestra»: una fila por elemento seleccionado, con las
@@ -48,7 +48,7 @@ las dos celdas VACIAS y sin formula. Una formula ahi restaria de una celda vacia
 y pintaria el saldo entero como error.
 
 La celda del fichero es un HIPERVINCULO al documento, con RUTA ABSOLUTA: el
-papel vive en InformesGesia y los escaneos en otra carpeta, asi que una ruta
+papel vive en AsistenteIA y los escaneos en otra carpeta, asi que una ruta
 relativa se rompe en cuanto el fichero se mueve o se abre desde otro sitio.
 
 La ruta sale del manifiesto de preparar_documentos.py (--manifiesto), que ya

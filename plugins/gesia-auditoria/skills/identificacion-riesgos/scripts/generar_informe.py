@@ -2,7 +2,7 @@
 
     python generar_informe.py --analisis analisis.json --seleccion seleccion.json \
         --cliente "RAZON SOCIAL, S.A." --cierre 31/12/25 --generado 2026-08-24 \
-        --salida "<expediente>/InformesGesia/IdentificacionRiesgos/....docx"
+        --salida "<expediente>/AsistenteIA/IdentificacionRiesgos/....docx"
 
 `--generado` es obligatorio: nada en este proyecto lee el reloj.
 

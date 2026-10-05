@@ -20,7 +20,7 @@ description: >
 Enseña de dónde sale cada epígrafe de las cuentas anuales: qué presentó el cliente, qué
 ajustes y reclasificaciones se le hicieron, y qué quedó auditado. Y lo cuadra.
 
-Los ficheros se escriben en `<expediente>\InformesGesia\EstadosFinancieros\` y **nunca se
+Los ficheros se escriben en `<expediente>\AsistenteIA\EstadosFinancieros\` y **nunca se
 publican** en ninguna URL: son la contabilidad de un cliente auditado.
 
 ---
@@ -177,7 +177,7 @@ python "<PLUGIN>\skills\estados-financieros\scripts\generar_papel.py" \
   --ejercicios "<TEMP>/gesia-eeff/ejercicios.json" \
   --cliente    "<razón social del expediente>" \
   --ejercicio  "<año del ejercicio corriente>" \
-  --salida     "<expediente>/InformesGesia/EstadosFinancieros/Estados Financieros <CLIENTE> <EJERCICIO>.xlsx"
+  --salida     "<expediente>/AsistenteIA/EstadosFinancieros/Estados Financieros <CLIENTE> <EJERCICIO>.xlsx"
 ```
 
 Cinco hojas: **Balance**, **PyG**, **Conciliacion**, **Ajustes** y **Comprobaciones**.
@@ -192,7 +192,7 @@ palabras.
 que no hay motivo para dejarlo a que al auditor se le ocurra pedirlo.
 
 ```bash
-python "<PLUGIN>\skills\estados-financieros\scripts\generar_ecpn.py"   --estructura "<TEMP>/gesia-eeff/estructura.json"   --cuentas    "<TEMP>/gesia-eeff/cuentas.json"   --ejercicios "<TEMP>/gesia-eeff/ejercicios.json"   --cliente    "<razón social del expediente>"   --ejercicio  "<año del ejercicio corriente>"   --salida     "<expediente>/InformesGesia/EstadosFinancieros/Patrimonio Neto <CLIENTE> <EJERCICIO>.xlsx"
+python "<PLUGIN>\skills\estados-financieros\scripts\generar_ecpn.py"   --estructura "<TEMP>/gesia-eeff/estructura.json"   --cuentas    "<TEMP>/gesia-eeff/cuentas.json"   --ejercicios "<TEMP>/gesia-eeff/ejercicios.json"   --cliente    "<razón social del expediente>"   --ejercicio  "<año del ejercicio corriente>"   --salida     "<expediente>/AsistenteIA/EstadosFinancieros/Patrimonio Neto <CLIENTE> <EJERCICIO>.xlsx"
 ```
 
 Cuatro hojas: **PatrimonioNeto**, **Movimiento**, **Detalle** y **Comprobaciones**.
@@ -272,7 +272,7 @@ python "<PLUGIN>\skills\estados-financieros\scripts\generar_efe.py" \
   --ejercicios "<TEMP>/gesia-eeff/ejercicios.json" \
   --cliente    "<razón social del expediente>" \
   --ejercicio  "<año del ejercicio corriente>" \
-  --salida     "<expediente>/InformesGesia/EstadosFinancieros/Flujos de Efectivo <CLIENTE> <EJERCICIO>.xlsx"
+  --salida     "<expediente>/AsistenteIA/EstadosFinancieros/Flujos de Efectivo <CLIENTE> <EJERCICIO>.xlsx"
 ```
 
 Cuatro hojas: **FlujosEfectivo**, **Ajustes**, **Apuntes** y **Comprobaciones**.
@@ -343,7 +343,7 @@ python "<PLUGIN>\skills\estados-financieros\scripts\proponer_efe.py" \
   --cuadro   "<TEMP>/gesia-eeff/cuadro.json" \
   --cliente  "<razón social del expediente>" \
   --ejercicio "<año del ejercicio corriente>" \
-  --salida   "<expediente>/InformesGesia/EstadosFinancieros/Propuesta EFE <CLIENTE> <EJERCICIO>.xlsx"
+  --salida   "<expediente>/AsistenteIA/EstadosFinancieros/Propuesta EFE <CLIENTE> <EJERCICIO>.xlsx"
 ```
 
 Tres hojas: **Propuestas**, **Catalogo** y **Comprobaciones**.

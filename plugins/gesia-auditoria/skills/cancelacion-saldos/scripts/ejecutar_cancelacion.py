@@ -1,7 +1,7 @@
 """Verifica el contrato y, si se puede seguir, escribe el papel de trabajo.
 
     python ejecutar_cancelacion.py --entrada extracto.csv \
-        --salida "<expediente>/InformesGesia/CancelacionSaldos/Cancelacion Saldos <CLIENTE>.xlsx"
+        --salida "<expediente>/AsistenteIA/CancelacionSaldos/Cancelacion Saldos <CLIENTE>.xlsx"
 
 Es exactamente lo que hacian los dos pasos de antes, en una sola llamada:
 

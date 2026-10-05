@@ -3,7 +3,7 @@
 
     python proponer_efe.py --catalogo catalogo.json --cuentas cuentas.json
         --cuadro cuadro.json --cliente "..." --ejercicio 2025
-        --salida "<expediente>/InformesGesia/EstadosFinancieros/Propuesta EFE <CLIENTE> <EJERCICIO>.xlsx"
+        --salida "<expediente>/AsistenteIA/EstadosFinancieros/Propuesta EFE <CLIENTE> <EJERCICIO>.xlsx"
 
 Gesia deja el importe de cada ajuste en blanco: la plantilla dice QUE lineas se mueven y en
 que sentido, y el auditor pone CUANTO. Este papel propone ese cuanto donde se puede sacar de

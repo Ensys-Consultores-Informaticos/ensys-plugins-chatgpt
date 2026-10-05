@@ -22,7 +22,7 @@ encontrar qué apuntes se cancelan entre sí, para que lo que quede sin
 cancelar sea el saldo pendiente de verdad, no una cifra agregada que
 esconde facturas ya liquidadas.
 
-Los ficheros se escriben en `<expediente>\InformesGesia\CancelacionSaldos\`
+Los ficheros se escriben en `<expediente>\AsistenteIA\CancelacionSaldos\`
 y **nunca se publican** en ninguna URL: son la contabilidad de un cliente
 auditado. **`<expediente>` es la carpeta del `gs3_file` que devuelve `configurar()`**,
 no una ruta escrita a mano ni recordada de otra sesión: el 10/09/2026 apareció en la
@@ -448,7 +448,7 @@ documento y el plazo de pago quedan sin evaluar** —la hoja de criterios lo dic
 los escondas. La línea C05 dice si el diario trae punteo previo y cuánto: úsala
 al explicar el resultado.
 
-Pásale a `--salida` la ruta del expediente directamente: el script crea el árbol `InformesGesia`. Si el expediente está en OneDrive, el entorno puede pedir autorización antes de escribir: pídesela al usuario y repite.
+Pásale a `--salida` la ruta del expediente directamente: el script crea el árbol `AsistenteIA`. Si el expediente está en OneDrive, el entorno puede pedir autorización antes de escribir: pídesela al usuario y repite.
 
 **Si el expediente está en OneDrive, el entorno puede rechazar la escritura antes
 de ejecutar nada** y pedir autorización expresa para escribir datos contables ahí.
@@ -532,7 +532,7 @@ cliente, que el auditor tendrá que mirar.
 
 **Los nombres.** El fichero se ha escrito con tokens. Cuando ya esté en el disco del auditor
 —en Cowork, después de bajarlo al expediente; en local, directamente—, llama a
-`rehidratar(ruta = "<expediente>/InformesGesia/…/<fichero>", leyenda = true)`: sustituye cada
+`rehidratar(ruta = "<expediente>/AsistenteIA/…/<fichero>", leyenda = true)`: sustituye cada
 token por el nombre real, en local, y devuelve recuentos —ni un nombre vuelve aquí—. Con
 `leyenda = true` añade la tabla token → nombre (hoja «Tokens» en el Excel), para que lo que
 has dicho en el chat con tokens se pueda leer en el papel. **Cuéntale al auditor los dos
@@ -542,7 +542,7 @@ dilos tal cual: son cuentas que el diccionario no conoce, no las completes tú.
 Con este párrafo, y sin llamar «rehidratar» a nada delante del auditor —para él es
 **desanonimizar**—:
 
-> *Papel generado y archivado en el expediente: `InformesGesia\…\<fichero>` (también lo tienes
+> *Papel generado y archivado en el expediente: `AsistenteIA\…\<fichero>` (también lo tienes
 > en el chat, aunque esa copia está anonimizada). Nombres ya desanonimizados: N sustituciones,
 > M terceros distintos, ninguno sin nombre, y hoja «Tokens» con la leyenda. El extracto
 > temporal está borrado.*

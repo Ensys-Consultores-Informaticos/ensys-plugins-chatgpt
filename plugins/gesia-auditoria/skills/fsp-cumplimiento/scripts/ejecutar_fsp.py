@@ -2,7 +2,7 @@
 
     python ejecutar_fsp.py --muestra muestra.json --parametros parametros.json \
         --facturas facturas.json --roles roles.json [--evaluacion evaluacion.json] \
-        --salida "<expediente>/InformesGesia/FspCumplimiento/Cumplimiento <PRUEBA> <CLIENTE> <EJERCICIO>.xlsx" \
+        --salida "<expediente>/AsistenteIA/FspCumplimiento/Cumplimiento <PRUEBA> <CLIENTE> <EJERCICIO>.xlsx" \
         --generado 2026-09-02
 
 Es lo que hacen los dos scripts de debajo, en una sola llamada:

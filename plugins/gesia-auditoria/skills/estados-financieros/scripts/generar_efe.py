@@ -4,7 +4,7 @@
     python generar_efe.py --cuadro cuadro.json --ajustes ajustes.json
         --estructura estructura.json --ejercicios ejercicios.json
         --cliente "..." --ejercicio 2025
-        --salida "<expediente>/InformesGesia/EstadosFinancieros/Flujos de Efectivo <CLIENTE> <EJERCICIO>.xlsx"
+        --salida "<expediente>/AsistenteIA/EstadosFinancieros/Flujos de Efectivo <CLIENTE> <EJERCICIO>.xlsx"
 
 Cuatro hojas:
 

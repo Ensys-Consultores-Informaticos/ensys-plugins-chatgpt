@@ -1,7 +1,7 @@
 """Escribe el papel de trabajo de cancelacion de saldos en Excel.
 
     python generar_papel.py --entrada extracto.csv \
-        --salida "<expediente>/InformesGesia/CancelacionSaldos/Cancelacion Saldos <CLIENTE>.xlsx"
+        --salida "<expediente>/AsistenteIA/CancelacionSaldos/Cancelacion Saldos <CLIENTE>.xlsx"
 
 Una hoja "Resumen" con una fila por cuenta, y una hoja por cuenta con el
 detalle FECHA / CUENTA / NOMBRE / [CONCEPTO, si viene] / SALDO / INDICE / ORIGEN, en

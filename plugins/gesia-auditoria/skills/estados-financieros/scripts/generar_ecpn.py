@@ -3,7 +3,7 @@
 
     python generar_ecpn.py --estructura estructura.json --cuentas cuentas.json
         --ejercicios ejercicios.json --cliente "..." --ejercicio 2025
-        --salida "<expediente>/InformesGesia/EstadosFinancieros/Patrimonio Neto <CLIENTE> <EJERCICIO>.xlsx"
+        --salida "<expediente>/AsistenteIA/EstadosFinancieros/Patrimonio Neto <CLIENTE> <EJERCICIO>.xlsx"
 
 Cuatro hojas:
 

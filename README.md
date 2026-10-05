@@ -64,7 +64,7 @@ que borra los que el propio servidor ha escrito. Si no se llama, se quedan en el
 ## Procedimientos incluidos
 
 Cada uno lee el expediente por el MCP, calcula con sus propios scripts y deja el papel de
-trabajo en `InformesGesia`, dentro del expediente o del cliente de muestreo. Son
+trabajo en `AsistenteIA`, dentro del expediente o del cliente de muestreo. Son
 **propuestas de papel de trabajo**: la valoración, el alcance y la conclusión son del
 auditor que firma. La columna de la derecha dice qué lleva el plugin de ForSampling; el de
 Gesia lleva todos.

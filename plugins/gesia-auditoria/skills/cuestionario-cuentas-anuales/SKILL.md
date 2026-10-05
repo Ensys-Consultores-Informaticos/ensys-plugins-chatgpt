@@ -16,7 +16,7 @@ description: >
 # Revisión del contenido de la memoria (Gesia)
 
 Produce un papel de trabajo, no una publicación. Los dos ficheros se escriben **siempre**
-en `<expediente>\InformesGesia\CuestionarioCuentasAnuales\` —la regla del proyecto de una
+en `<expediente>\AsistenteIA\CuestionarioCuentasAnuales\` —la regla del proyecto de una
 subcarpeta por skill, para que el auditor sepa dónde buscar sin preguntar— y **nunca se
 publican** en ninguna URL: contienen las cuentas anuales de un cliente auditado.
 
@@ -300,7 +300,7 @@ python "<PLUGIN>\skills\cuestionario-cuentas-anuales\scripts\generar_xlsx.py" \
 
 Aborta si falta alguna pregunta por responder o si hay respuestas fuera de 1-4.
 
-**El destino es la carpeta del expediente**, directamente: `<expediente>/InformesGesia/CuestionarioCuentasAnuales/`. Vale igual para el papel de trabajo del paso siguiente.
+**El destino es la carpeta del expediente**, directamente: `<expediente>/AsistenteIA/CuestionarioCuentasAnuales/`. Vale igual para el papel de trabajo del paso siguiente.
 
 Copia once columnas literales del expediente y calcula una, `Respuesta`. En particular
 **`CodigoRealizado` no se deduce**: hay expedientes con preguntas contestadas y esa
@@ -314,7 +314,7 @@ python "<PLUGIN>\skills\cuestionario-cuentas-anuales\scripts\generar_papel.py" \
     --respuestas "<TRABAJO>/respuestas.json" \
     --generado "<AAAA-MM-DD>" \
     --cliente "<razón social>" --cierre "<fecha de cierre>" \
-    --salida "<expediente>/InformesGesia/CuestionarioCuentasAnuales/revision_memoria_<CLIENTE>_<EJERCICIO>.docx"
+    --salida "<expediente>/AsistenteIA/CuestionarioCuentasAnuales/revision_memoria_<CLIENTE>_<EJERCICIO>.docx"
 ```
 
 `--generado` es obligatorio y lo pones tú: **nada en este skill lee el reloj**. Un papel de
@@ -327,7 +327,7 @@ respondía, quedaba vacía sin decir nada. Ahora al menos el hueco se ve en el c
 ### Paso 9 — Entregar
 
 Di la ruta completa de los dos ficheros —siempre
-`<expediente>\InformesGesia\CuestionarioCuentasAnuales\`— y **cuántas preguntas
+`<expediente>\AsistenteIA\CuestionarioCuentasAnuales\`— y **cuántas preguntas
 quedaron en `2` y en `4`**, que es el trabajo que le queda al auditor. Recuérdale que:
 
 - el Excel se importa **desde Gesia**, y conviene revisarlo antes. El formato está
@@ -348,7 +348,7 @@ rm -rf "<TRABAJO>"
 
 **Y cuenta con que en Cowork no te dejen**: el puente no tiene permiso de borrado
 en el equipo del usuario (comprobado el 25/08/2026). Por eso los volcados van a la
-carpeta temporal del sistema y **nunca a `InformesGesia`**, donde solo debe quedar
+carpeta temporal del sistema y **nunca a `AsistenteIA`**, donde solo debe quedar
 el entregable. Si el borrado falla, di las rutas exactas de lo que queda.
 
 

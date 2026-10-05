@@ -1,6 +1,6 @@
 {
   "name": "forsampling-auditoria",
-  "version": "2.0.4",
+  "version": "2.0.6",
   "description": "Pruebas de muestreo sobre el cliente de muestreo de ForSampling mediante un servidor MCP local para Windows, para quien no tiene la suite de Gesia.",
   "author": {
     "name": "Ensys Consultores Informáticos, S.L."
@@ -20,7 +20,7 @@
     "logoDark": "./assets/logo.png",
     "brandColor": "#82B54C",
     "displayName": "ForSampling — Pruebas de muestreo",
-    "shortDescription": "Pruebas de muestreo de ForSampling contra las facturas escaneadas, en Windows. (MCP 1.24.3) (v2.0.4)",
+    "shortDescription": "Pruebas de muestreo de ForSampling contra las facturas escaneadas, en Windows. (MCP 1.24.4) (v2.0.6)",
     "longDescription": "Conecta ChatGPT Desktop y Codex con el cliente de muestreo de ForSampling (.cli), para quien trabaja con ForSampling sin la suite de Gesia. Cuatro procedimientos: la validación de la muestra de una prueba de cumplimiento y de una MUM contra las facturas escaneadas, el papel de trabajo de la NIA-ES 530 de la MUM, en Word, y el registro de ejecución. Los papeles quedan en la carpeta del cliente de muestreo: son propuestas, y quien valora y concluye es el auditor que firma. Los nombres de proveedores y clientes viajan anonimizados —el asistente ve un código por cuenta, no la razón social— y el papel los recupera en tu equipo al entregarlo. Las facturas escaneadas se tachan en tu equipo antes de subirlas: los PDF no salen de tu disco, y los importes, las fechas y el número de documento quedan legibles. Lo que no se puede tapar se te dice antes de subir nada. Si tienes Gesia, no instales este: el plugin de Gesia ya lo incluye todo. Requiere Windows y ForSampling instalado.",
     "developerName": "Ensys Consultores Informáticos, S.L.",
     "category": "Productivity",

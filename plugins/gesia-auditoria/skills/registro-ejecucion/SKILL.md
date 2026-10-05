@@ -35,7 +35,7 @@ el auditor preguntó en el momento. Lo que no se pregunta, se pierde.
 ## Reglas duras
 
 **1. La salida es texto en el chat. No se escribe ningún fichero.** Ni en el
-expediente, ni en `InformesGesia`, ni temporal. Este registro no es un papel de
+expediente, ni en `AsistenteIA`, ni temporal. Este registro no es un papel de
 trabajo: es información sobre el producto, y no pinta nada en el archivo de un
 encargo firmado. El auditor lo copia desde el chat.
 

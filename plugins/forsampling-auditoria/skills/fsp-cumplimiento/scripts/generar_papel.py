@@ -3,7 +3,7 @@
     python generar_papel.py --muestra muestra.json --parametros parametros.json \
         --facturas facturas.json --roles roles.json [--evaluacion evaluacion.json] \
         [--manifiesto manifiesto.json] [--carpeta-documentos C] \
-        --salida "<expediente>/InformesGesia/FspCumplimiento/Cumplimiento <PRUEBA> <CLIENTE> <EJERCICIO>.xlsx" \
+        --salida "<expediente>/AsistenteIA/FspCumplimiento/Cumplimiento <PRUEBA> <CLIENTE> <EJERCICIO>.xlsx" \
         --generado 2026-09-02
 
 Una sola hoja, «Analisis muestra», en cuatro zonas de color con su banda de

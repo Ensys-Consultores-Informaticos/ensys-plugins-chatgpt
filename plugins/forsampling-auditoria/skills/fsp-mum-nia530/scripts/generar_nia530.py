@@ -2,7 +2,7 @@
 """Escribe el papel de trabajo NIA-ES 530 de una prueba MUM en Word.
 
     python generar_nia530.py --datos nia530.json --generado 2026-09-30 \
-        --salida "<expediente>/InformesGesia/FspMum/Papel NIA-ES 530 <prueba> <cliente> <fecha>.docx"
+        --salida "<expediente>/AsistenteIA/FspMum/Papel NIA-ES 530 <prueba> <cliente> <fecha>.docx"
 
 Lee `nia530.json` -el esquema esta en el SKILL.md- y escribe el .docx. TODO DATO NULL SALE COMO
 «PENDIENTE» EN AMBAR, con quien lo aporta entre parentesis: FS (ForSampling), GS (Gesia), DOC

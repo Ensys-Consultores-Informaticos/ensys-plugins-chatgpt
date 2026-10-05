@@ -20,7 +20,7 @@ con la fuente de cada dato al lado, y deja en blanco —marcado **PENDIENTE** y 
 aporta— todo lo que no consta en ningún fichero. No infiere, no estima, no rellena con
 ejercicios anteriores.
 
-El fichero se escribe en `<expediente>\InformesGesia\FspMum\`, la misma carpeta que el papel en
+El fichero se escribe en `<expediente>\AsistenteIA\FspMum\`, la misma carpeta que el papel en
 Excel de `fsp-mum`, con el nombre `Papel NIA-ES 530 <prueba> <cliente> <fecha>.docx`, y **nunca
 se publica** en ninguna URL: describe una prueba de auditoría de un cliente. `<expediente>` es
 **la carpeta del fichero configurado**: la del `.gs3`, o la del `.cli` cuando se trabaja solo
@@ -132,7 +132,7 @@ contable por cuenta) y `diario`. Lo que no te haya dicho se queda en `null`.
 ```bash
 python "<PLUGIN>\skills\fsp-mum-nia530\scripts\generar_nia530.py" \
   --datos "<TRABAJO>\nia530.json" --generado "<dd/mm/aaaa de hoy>" \
-  --salida "<expediente>/InformesGesia/FspMum/Papel NIA-ES 530 <prueba> <cliente> <fecha>.docx"
+  --salida "<expediente>/AsistenteIA/FspMum/Papel NIA-ES 530 <prueba> <cliente> <fecha>.docx"
 ```
 
 Antes de escribir comprueba que la suma de unidades es el tamaño seleccionado, que hay tantos

@@ -22,7 +22,7 @@ description: >
 Propone riesgos **elegidos de un catálogo**, no redactados. Cada uno con el
 epígrafe y el importe que lo justifican.
 
-El informe se escribe en `<expediente>\InformesGesia\IdentificacionRiesgos\` y
+El informe se escribe en `<expediente>\AsistenteIA\IdentificacionRiesgos\` y
 **nunca se publica** en ninguna URL: contiene las cifras de un cliente auditado.
 
 ---
@@ -516,7 +516,7 @@ python "<PLUGIN>\skills\identificacion-riesgos\scripts\generar_informe.py" \
     --salida "<destino>/Riesgos <CLIENTE> <EJERCICIO>.docx"
 ```
 
-**El destino es la carpeta del expediente**, directamente: `<expediente>/InformesGesia/IdentificacionRiesgos/`.
+**El destino es la carpeta del expediente**, directamente: `<expediente>/AsistenteIA/IdentificacionRiesgos/`.
 
 `--generado` lo pones tú: nada aquí lee el reloj. **`--catalogo` es obligatorio**,
 igual que en el paso anterior.
@@ -585,7 +585,7 @@ rm -rf "<TRABAJO>"
 
 **Y cuenta con que en Cowork no te dejen**: el puente no tiene permiso de borrado
 en el equipo del usuario (comprobado el 25/08/2026). Por eso los volcados van a la
-carpeta temporal del sistema y **nunca a `InformesGesia`**, donde solo debe quedar
+carpeta temporal del sistema y **nunca a `AsistenteIA`**, donde solo debe quedar
 el entregable.
 
 Si el borrado del directorio de trabajo falla, dos cosas, en este orden:
