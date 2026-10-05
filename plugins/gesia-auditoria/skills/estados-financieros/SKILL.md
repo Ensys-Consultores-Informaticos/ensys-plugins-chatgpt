@@ -1,43 +1,18 @@
 ---
 name: estados-financieros-gesia
 description: >
-  Revisión de los estados financieros de un expediente de auditoría de Gesia.
-  Produce el papel de trabajo en Excel con el balance y la cuenta de pérdidas y
-  ganancias comparados de los ejercicios cargados, y la conciliación del ejercicio
-  corriente: del saldo que presenta el cliente al saldo auditado, pasando por los
-  ajustes y las reclasificaciones, epígrafe a epígrafe y cuenta a cuenta.
-  Usa este skill cuando el usuario pida revisar o cuadrar los estados financieros,
-  el balance o la cuenta de resultados, ver los ajustes de auditoría por epígrafe,
-  comparar lo presentado por el cliente con lo auditado, o diga cosas como
-  "saca el balance comparado", "revisa las cifras del expediente",
-  "qué epígrafes han cambiado con los ajustes", "cuadra el balance",
-  "revisa el balance y la PyG del expediente" o "papel de estados financieros".
-  Hace también la revisión del PATRIMONIO NETO: de la apertura auditada al cierre
-  auditado, componente a componente. Úsalo si piden el ECPN, el estado de cambios
-  en el patrimonio neto, el movimiento de reservas o de subvenciones, o dicen
-  "cómo ha variado el patrimonio neto" o "de dónde sale el patrimonio neto".
-  Y la del ESTADO DE FLUJOS DE EFECTIVO, leyendo el módulo EFE del expediente:
-  el estado que hay, sus ajustes, cuáles están aprobados y si todo cuadra. Úsalo
-  si piden el EFE, el estado de flujos, los flujos de explotación, de inversión o
-  de financiación, o "revisa el cash flow del expediente".
-  Sabe además PROPONER el importe de los ajustes del estado de flujos a partir del
-  catálogo de plantillas del propio expediente. Úsalo si piden ayuda para montar
-  el EFE, calcular los ajustes de flujos, o dicen "qué ajustes faltan" o "de dónde
-  saco los importes del cuadro".
-  NO formula las cuentas anuales: el auditor no las formula, las revisa. NO es el
-  cuestionario de la memoria, ni el cuadro de mando del diario, ni la prueba de
-  continuidad de saldos de apertura. NO calcula el estado de flujos ni propone
-  ajustes a él: lo lee del expediente y lo cuadra. Y NO reproduce el ECPN oficial:
-  reconcilia el patrimonio neto, no reparte su variación entre resultado,
-  operaciones con socios y otras variaciones, que es del auditor.
-  SI EL USUARIO DICE SOLO «CUENTAS ANUALES», NO LANCES NADA: son el conjunto
-  entero —balance, resultados, patrimonio neto, flujos y memoria— y hay DOS
-  skills que hacen partes distintas. Este trabaja con LAS CIFRAS que ya están
-  cargadas en el expediente y no necesita ningún PDF; el cuestionario de cuentas
-  anuales revisa EL CONTENIDO DE LA MEMORIA a partir del PDF del cliente.
-  Pregunta cuál de los dos quiere antes de tocar nada.
-  Requiere Gesia con el servidor API arrancado y un expediente con las cifras
-  cargadas en balance y pérdidas y ganancias.
+  Revisión de los estados financieros de un expediente de Gesia, con las cifras ya
+  cargadas: papeles en Excel con el balance y la cuenta de resultados comparados, la
+  conciliación de lo presentado por el cliente a lo auditado, epígrafe a epígrafe y cuenta
+  a cuenta, el movimiento del patrimonio neto, y el estado de flujos de efectivo del
+  módulo EFE con sus ajustes; si no hay ajustes de flujos aprobados, propone sus importes.
+  Úsalo si piden revisar o cuadrar el balance, la PyG, los ajustes por epígrafe, el ECPN,
+  el EFE o el cash flow, o dicen "saca el balance comparado", "cómo ha variado el
+  patrimonio neto" o "qué ajustes faltan en el estado de flujos". NO formula cuentas
+  anuales, y no es el cuestionario de la memoria, ni el cuadro de mando del diario, ni la
+  continuidad de saldos. SI SOLO DICEN «CUENTAS ANUALES», NO LANCES NADA: este revisa LAS
+  CIFRAS del expediente, sin PDF; el cuestionario revisa EL CONTENIDO DE LA MEMORIA con el
+  PDF del cliente. Pregunta cuál quieren.
 ---
 
 # Revisión de estados financieros (Gesia)

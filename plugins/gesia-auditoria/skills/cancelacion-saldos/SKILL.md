@@ -1,24 +1,17 @@
 ---
 name: cancelacion-saldos-gesia
 description: >
-  Empareja los saldos positivos y negativos del mayor de una o varias
-  cuentas del diario de un expediente de auditoría de Gesia —típicamente
-  facturas contra sus pagos o cobros—, asignando un ÍNDICE de cancelación
-  a cada grupo de apuntes cuya suma da cero. Respeta y completa el punteo
-  que muchos diarios ya traen en el campo Indice: lo punteado en la
-  contabilidad no se toca, y el skill empareja lo que quedó sin puntear.
-  Genera el papel de trabajo en Excel (una hoja por cuenta, en orden
-  cronológico: gris lo ya punteado en contabilidad, amarillo los importes
-  sin parear que componen el saldo vivo). Usa este skill cuando el usuario pida
-  cancelar o cuadrar saldos de una cuenta, emparejar facturas con pagos o
-  cobros, ver qué queda pendiente de cobro o de pago, completar el punteo
-  del diario, o diga cosas como "cancela los saldos de esta cuenta",
-  "empareja facturas y pagos", "qué facturas están pendientes", "índice de
-  cancelación", "completa el punteo" o "casa los cobros con las facturas".
-  NO es la continuidad de saldos de apertura (eso compara ejercicios, esto
-  empareja dentro de un mismo ejercicio) ni el cuadro de mando del diario.
-  Requiere Gesia abierto con el servidor API arrancado y un expediente con
-  diario importado.
+  Empareja los saldos positivos y negativos del mayor de una o varias cuentas del diario
+  de un expediente de Gesia —típicamente facturas contra pagos o cobros— y asigna un
+  ÍNDICE de cancelación a cada grupo que suma cero. Respeta el punteo que ya trae el
+  diario en el campo Indice y empareja lo que quedó sin puntear. Deja el papel en Excel,
+  una hoja por cuenta: gris lo punteado en contabilidad, amarillo lo que compone el saldo
+  vivo. Úsalo si piden cancelar, conciliar o cuadrar los saldos de una cuenta, emparejar
+  facturas con pagos o cobros, ver qué queda pendiente o completar el punteo, o dicen
+  "cancela los saldos de esta cuenta" o "casa los cobros con las facturas". NO es la
+  continuidad de saldos de apertura (eso compara ejercicios) ni el cuadro de mando del
+  diario. Requiere el servidor API de Gesia arrancado y un expediente con diario
+  importado.
 ---
 
 # Cancelación de saldos (Gesia)

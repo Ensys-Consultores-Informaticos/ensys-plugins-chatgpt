@@ -1,25 +1,18 @@
 ---
 name: fsp-mum-gesia
 description: >
-  Valida contra las facturas escaneadas la muestra de una PRUEBA MUM (muestreo
-  por unidades monetarias) de ForSampling, el módulo de muestreo de la suite de
-  Gesia: localiza el documento de cada elemento seleccionado, mide el importe que
-  el documento sostiene y propone las tres columnas que espera ForSampling —saldo
-  según auditoría, error y tasa de error— más la observación redactada para
-  copiar, con la firma «Asistente IA». Genera el papel de trabajo en Excel con un
-  elemento por fila. Usa este skill cuando el usuario pida validar o revisar la
-  muestra de una prueba MUM, comprobar los importes contabilizados contra las
-  facturas, calcular las diferencias o el error por elemento, rellenar el saldo
-  según auditoría, o diga cosas como "revisa la MUM de servicios exteriores",
-  "cuadra los importes de la muestra con las facturas", "qué diferencias hay
-  entre libros y las facturas de la muestra", "rellena el saldo de auditoría" o
-  "prueba MUM de ForSampling". NO es la prueba de cumplimiento (atributos Sí/No,
-  que va por fsp-cumplimiento) ni la circularización de terceros, ni la
-  cancelación de saldos del diario. **No proyecta el error a la población, no lo
-  compara con el error tolerable y no concluye si la prueba pasa: eso lo hace
-  ForSampling.** Requiere Gesia o ForSampling abierto con el servidor API
-  arrancado, el expediente con cliente de muestreo vinculado (o el .cli
-  directamente), y la carpeta con los documentos escaneados.
+  Valida contra las facturas escaneadas la muestra de una PRUEBA MUM (muestreo por
+  unidades monetarias) de ForSampling: localiza el documento de cada elemento, mide el
+  importe que sostiene y propone las columnas que espera ForSampling —saldo según
+  auditoría, error y tasa de error— con la observación para copiar. Deja el papel en
+  Excel, un elemento por fila. Úsalo si piden validar o revisar la muestra de una MUM,
+  comprobar los importes contra las facturas, calcular el error por elemento o rellenar el
+  saldo de auditoría, o dicen "revisa la MUM de servicios exteriores" o "qué diferencias
+  hay entre libros y las facturas de la muestra". NO es la prueba de cumplimiento (fsp-
+  cumplimiento) ni el papel de la NIA 530 (fsp-mum-nia530), ni la circularización, ni la
+  cancelación de saldos. NO proyecta el error ni concluye si la prueba pasa: eso lo hace
+  ForSampling. Requiere el servidor API arrancado, el .cli o el expediente que lo vincula,
+  y la carpeta de los documentos escaneados.
 ---
 _Versión del skill: 18/09/2026 · plugin interno 1.51.0 · pide MCP ≥ 1.19.1._
 

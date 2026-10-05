@@ -1,23 +1,16 @@
 ---
 name: fsp-mum-nia530-gesia
 description: >
-  Redacta el PAPEL DE TRABAJO de la NIA-ES 530 de una prueba MUM de ForSampling, en Word:
-  objetivo, población y su cuadre, parámetros del diseño descodificados, selección, resultados
-  por elemento, desviaciones, la lista de lo que falta y las firmas; TODO leído de los
-  ficheros de ForSampling por el MCP, nada de un PDF. Es el compañero en Word del papel en Excel que hace fsp-mum, y lo lee
-  si se ha ejecutado en la sesión. Usa este skill cuando el usuario pida el papel de la NIA 530,
-  documentar o redactar la prueba de muestreo, el informe de muestreo MUM, o diga cosas como
-  "haz el papel de la NIA 530 de la MUM", "documenta la prueba de muestreo de compras",
-  "redacta el papel de trabajo de la muestra" o "el memorándum del muestreo".
-  NO valida facturas ni mide importes contra documentos: eso es fsp-mum, que produce el Excel
-  del que este toma los resultados por elemento. NO es la prueba de cumplimiento
-  (fsp-cumplimiento). NO proyecta el error, NO lo compara con el error tolerable como
-  conclusión y NO dice si la prueba se supera: la proyección no se guarda en los ficheros de
-  ForSampling, se calcula al emitir el informe, y el papel deja el hueco. La conclusión queda
-  en blanco, que es del auditor.
-  Requiere el servidor API de Gesia arrancado, el cliente de muestreo (.cli) o el expediente
-  que lo vincula, y el MCP 1.23.0 o posterior, que es el que devuelve los parámetros
-  descodificados y el resumen de la población.
+  Redacta en Word el PAPEL DE TRABAJO de la NIA-ES 530 de una prueba MUM de ForSampling:
+  objetivo, población y su cuadre, parámetros del diseño, selección, resultados por
+  elemento, desviaciones, lo que falta y las firmas, todo leído de los ficheros de
+  ForSampling. Si fsp-mum se ha ejecutado en la sesión, toma de su Excel los resultados
+  por elemento. Úsalo si piden el papel de la NIA 530, documentar o redactar la prueba de
+  muestreo o el memorándum del muestreo, o dicen "haz el papel de la NIA 530 de la MUM".
+  NO valida facturas ni mide importes (eso es fsp-mum) y NO es la prueba de cumplimiento.
+  NO proyecta el error ni dice si la prueba se supera: la conclusión queda en blanco, que
+  es del auditor. Requiere el servidor API arrancado y el .cli o el expediente que lo
+  vincula.
 ---
 
 # Papel de trabajo NIA-ES 530 de una prueba MUM (Word)

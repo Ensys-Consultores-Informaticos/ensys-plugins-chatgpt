@@ -1,25 +1,18 @@
 ---
 name: fsp-cumplimiento-gesia
 description: >
-  Valida contra las facturas escaneadas la muestra de una PRUEBA DE CUMPLIMIENTO
-  de ForSampling (el módulo de muestreo de la suite de Gesia): localiza el
-  documento de cada elemento seleccionado, comprueba lo que se puede comprobar
-  desde el documento —que existe y es el del apunte, que base + IVA = total, que
-  importe y fecha coinciden con libros— y propone por elemento un veredicto por
-  atributo (Ok, hallazgo con cifras, o «auditor» cuando el control no se infiere
-  del documento), redactado con la fórmula «Asistente IA: A1: Ok · A2: … · A3:
-  auditor». Genera el papel de trabajo en Excel: una hoja con un elemento por fila,
-  el documento localizado, lo leído en él y la observación propuesta. Usa este skill
-  cuando el usuario pida validar, revisar o documentar la muestra de una prueba de
-  cumplimiento, cruzar la muestra con las facturas escaneadas, rellenar los
-  atributos de una prueba de ForSampling, o diga cosas como "valida la muestra de
-  compras contra las facturas", "revisa las facturas de la prueba de cumplimiento",
-  "cruza la selección con los PDF", "rellena los atributos" o "prueba de
-  cumplimiento de ForSampling". NO es la prueba MUM (importes según auditor y
-  errores) ni la circularización (cartas de terceros), ni la cancelación de saldos
-  del diario. Requiere Gesia o ForSampling abierto con el servidor API arrancado, el
-  expediente con cliente de muestreo vinculado (o el .cli directamente), y la
-  carpeta con los documentos escaneados.
+  Valida contra las facturas escaneadas la muestra de una PRUEBA DE CUMPLIMIENTO de
+  ForSampling: localiza el documento de cada elemento, comprueba lo que el documento
+  sostiene —que existe y es el del apunte, que base + IVA = total, que importe y fecha
+  coinciden con libros— y propone un veredicto por atributo (Ok, hallazgo con cifras, o
+  «auditor» si no se infiere del documento). Deja el papel en Excel, un elemento por fila.
+  Úsalo si piden validar, revisar o documentar la muestra de una prueba de cumplimiento de
+  controles, cruzarla con las facturas o los PDF, o rellenar los atributos, o dicen
+  "valida la muestra de compras contra las facturas" o "prueba de cumplimiento de
+  ForSampling". NO es la prueba MUM (importes y errores, que va por fsp-mum), ni la
+  circularización de terceros, ni la cancelación de saldos. Requiere el servidor API
+  arrancado, el .cli o el expediente que lo vincula, y la carpeta de los documentos
+  escaneados.
 ---
 _Versión del skill: 18/09/2026 · plugin interno 1.51.0 · pide MCP ≥ 1.19.1._
 

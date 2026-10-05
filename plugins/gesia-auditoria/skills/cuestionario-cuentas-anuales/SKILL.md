@@ -2,22 +2,15 @@
 name: cuestionario-cuentas-anuales-gesia
 description: >
   Rellena el cuestionario de revisión del contenido de la memoria de un expediente de
-  auditoría de Gesia, a partir de las cuentas anuales del cliente en PDF, y produce el
-  Excel con el formato de exportación de Gesia listo para importar más un papel de
-  trabajo en Word que justifica cada respuesta.
-  Usa este skill cuando el usuario pida revisar la memoria del cliente,
-  rellenar o contestar el cuestionario de cuentas anuales, comprobar el
-  contenido de la memoria, repasar los desgloses de la memoria, o diga cosas como
-  "revisa la memoria", "contesta el cuestionario de cuentas anuales", "comprueba qué
-  desgloses faltan en la memoria", "rellena el AG)20", "checklist de la memoria" o
-  "revisión del contenido de la memoria".
-  NO es para el diario contable, ni para ratios o revisión analítica.
-  SI EL USUARIO DICE SOLO «CUENTAS ANUALES», NO LANCES NADA: son el conjunto
-  entero y hay DOS skills que hacen partes distintas. Este revisa EL CONTENIDO
-  DE LA MEMORIA y necesita el PDF del cliente; `estados-financieros` revisa LAS
-  CIFRAS cargadas en el expediente —balance, resultados, patrimonio neto y
-  flujos— y no necesita ningún PDF. Pregunta cuál quiere antes de tocar nada.
-  Requiere Gesia abierto con el servidor API arrancado, y las cuentas anuales en PDF.
+  Gesia a partir de las cuentas anuales del cliente en PDF: un Excel con el formato de
+  exportación de Gesia, listo para importar, y un papel en Word que justifica cada
+  respuesta. Úsalo si piden revisar la memoria, contestar el cuestionario de cuentas
+  anuales o comprobar qué desgloses faltan, o dicen "revisa la memoria", "rellena el
+  AG)20" o "checklist de la memoria". NO es para el diario contable, ni para ratios o
+  revisión analítica. SI SOLO DICEN «CUENTAS ANUALES», NO LANCES NADA: este revisa EL
+  CONTENIDO DE LA MEMORIA y necesita el PDF; estados-financieros revisa LAS CIFRAS del
+  expediente, sin PDF. Pregunta cuál quieren. Requiere el servidor API de Gesia arrancado
+  y las cuentas anuales en PDF.
 ---
 
 # Revisión del contenido de la memoria (Gesia)
