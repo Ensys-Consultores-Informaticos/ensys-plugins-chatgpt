@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "gesia": {
+      "command": "./server/gesia_mcp-1.24.3.exe",
+      "args": [],
+      "cwd": ".",
+      "enabled": true,
+      "startup_timeout_sec": 20,
+      "env": {
+        "ENSYS_PLUGIN": "gesia"
+      }
+    }
+  }
+}

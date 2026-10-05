@@ -1,0 +1,32 @@
+{
+  "name": "ensys",
+  "interface": {
+    "displayName": "Ensys Plugins"
+  },
+  "plugins": [
+    {
+      "name": "gesia-auditoria",
+      "source": {
+        "source": "local",
+        "path": "./plugins/gesia-auditoria"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "forsampling-auditoria",
+      "source": {
+        "source": "local",
+        "path": "./plugins/forsampling-auditoria"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    }
+  ]
+}
