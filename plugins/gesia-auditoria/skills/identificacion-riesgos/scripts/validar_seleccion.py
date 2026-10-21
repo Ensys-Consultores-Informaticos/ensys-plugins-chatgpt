@@ -1,6 +1,12 @@
 """Comprueba que los riesgos elegidos existen y estan bien citados. Puede abortar.
 
-    python validar_seleccion.py --seleccion seleccion.json [--analisis analisis.json]
+    python validar_seleccion.py --seleccion seleccion.json --catalogo riesgos.json \
+        [--analisis analisis.json] [--ejercicio 2025] --avisos-salida avisos.json
+
+`--avisos-salida` deja los avisos en un JSON que generar_informe.py lleva al
+informe: «tienen que constar en el informe» no puede depender de que el modelo los
+copie a mano. Se escribe siempre, haya avisos o no, para que un fichero de una
+validacion anterior no sobreviva a esta.
 
 Esto es lo que sustituye a la instruccion «no te los inventes». Con un catalogo en
 disco y ids, que un riesgo exista no es una recomendacion al modelo: es una
@@ -33,12 +39,16 @@ import json
 import sys
 from pathlib import Path
 
-from lib_riesgos import (
+# con `python -I` la carpeta del script no entra en sys.path y lib_riesgos no se encuentra
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib_riesgos import (           # noqa: E402
     MAX_RIESGOS,
     MIN_RIESGOS,
     SinObligatorios,
     aviso_master,
     cargar_catalogo,
+    nota_master,
     resolver_obligatorios,
     salida_utf8,
 )
@@ -52,7 +62,10 @@ def main() -> int:
     p.add_argument("--catalogo")
     p.add_argument("--ejercicio",
                    help="el ejercicio auditado, p.ej. 2025. Solo sirve para avisar "
-                        "si el catálogo es del máster de otro año")
+                        "si el catálogo es de un máster anterior; uno posterior "
+                        "es lo normal y sale como INFO")
+    p.add_argument("--avisos-salida",
+                   help="JSON donde dejar los avisos para generar_informe.py --avisos")
     args = p.parse_args()
 
     catalogo = cargar_catalogo(args.catalogo)
@@ -74,7 +87,8 @@ def main() -> int:
         print("ERROR: la selección no trae ningún riesgo.")
         return 2
 
-    errores, avisos = [], []
+    # `notas` son informativas: no cambian el codigo de salida ni van al informe
+    errores, avisos, notas = [], [], []
 
     # V01 · los ids existen. Un id inventado es el fallo que esto viene a evitar.
     ids = []
@@ -111,8 +125,11 @@ def main() -> int:
             errores.append("el riesgo " + str(i) + " se cita como " + repr(dado)
                            + " y en el catálogo es " + repr(esperado))
         elif not dado:
-            avisos.append("el riesgo " + str(i) + " viene sin nombre; se usará el "
-                          "del catálogo")
+            # El nombre es opcional (SKILL.md, paso 6): sin el se usa el del catalogo,
+            # que es justo lo que se quiere. Hasta el 20/10/2026 contaba como aviso y
+            # daba salida 1 en una seleccion correcta.
+            notas.append("el riesgo " + str(i) + " viene sin nombre; se usa el del "
+                         "catálogo: «" + esperado + "»")
 
     # V04 · los dos obligatorios, con el numero que tienen en este catalogo
     for r in obligatorios:
@@ -160,16 +177,36 @@ def main() -> int:
                           + repr(ev.get("ratio") or ev.get("elemento"))
                           + " pero no su valor")
 
-    # V07 · el master del catalogo. Se avisa, no se aborta: puede haber una razon
-    # para usar el de otro año, pero tiene que ser una decision y no un descuido.
+    # V07 · el master del catalogo. Un master ANTERIOR al ejercicio se avisa, no se
+    # aborta: puede haber una razon, pero tiene que ser una decision y no un
+    # descuido. Uno POSTERIOR es lo normal -la firma mantiene solo el vigente- y va
+    # como INFO, sin contar ni llegar al informe (registro del 21/10/2026).
     desfase = aviso_master(catalogo, args.ejercicio)
     if desfase:
         avisos.append(desfase)
+    vigente = nota_master(catalogo, args.ejercicio)
+    if vigente:
+        notas.append(vigente)
 
     for e in errores:
         print("ERROR   " + e)
     for a in avisos:
         print("AVISO   " + a)
+    for x in notas:
+        print("INFO    " + x)
+
+    if args.avisos_salida:
+        # Los ids van con los avisos para que generar_informe.py compruebe que la
+        # validacion es de ESTA seleccion, y no de una anterior que se corrigio luego.
+        destino = Path(args.avisos_salida)
+        destino.parent.mkdir(parents=True, exist_ok=True)
+        destino.write_text(json.dumps({
+            "valida": not errores,
+            "ids": sorted(set(ids)),
+            "catalogo": catalogo.get("version") or "",
+            "avisos": avisos,
+            "errores": errores,
+        }, ensure_ascii=False, indent=1, allow_nan=False), encoding="utf-8")
 
     if errores:
         print("\nLa selección no vale. No se genera el informe.")
@@ -185,7 +222,9 @@ def main() -> int:
         print("  obligatorio: " + str(r["id"]) + " — " + r["nombre"])
     if avisos:
         print("Con " + str(len(avisos)) + " aviso(s) que tienen que constar en el "
-              "informe.")
+              "informe" + (": van en " + args.avisos_salida + " para generar_informe.py "
+                           "--avisos." if args.avisos_salida else
+                           ". Sin --avisos-salida no llegarán solos: repite con él."))
         return 1
     return 0
 

@@ -120,11 +120,86 @@ def exigir_tokens(cuentas, en_claro_por_el_auditor: bool = False) -> bool:
         return True
     print(f"❌ {len(malas)} cuentas de tercero traen el NOMBRE EN CLARO (la primera, la {malas[0]}). "
           "Falta configurar(perfil = \"estados-financieros\") ANTES de exportar: el perfil los "
-          "tokeniza y el papel los recupera al final con rehidratar. Vuelve a exportar el plan con el "
+          "seudonimiza y el papel los recupera al final con rehidratar. Vuelve a exportar el plan con el "
           "perfil puesto y repite; no muevas este fichero a ningun sitio, y borralo con "
-          "limpiar_exportaciones(). Solo si el auditor ha apagado él la tokenización "
+          "limpiar_exportaciones(procedimiento = \"estados-financieros\"). Solo si el auditor ha apagado él la seudonimización "
           "(configurar dice «forzado por el auditor») se sigue, con --nombres-en-claro. No se genera nada.")
     return False
+
+
+def frase_terceros(cuentas, en_claro_por_el_auditor: bool = False) -> str:
+    """La comprobacion de los nombres de terceros, como frase VERDADERA para el bloque de uso de IA.
+
+    Se calcula sobre el mismo plan que lleva el papel: si el auditor apago la seudonimizacion y
+    hay nombres en claro, lo dice con ATENCION y el numero de cuentas, nunca con los nombres."""
+    malas = nombres_en_claro(cuentas)
+    if not malas:
+        return ("Nombres de terceros: ninguna cuenta de tercero del plan llega con el nombre en "
+                "claro; los terceros van seudonimizados (PROV/CLI/TER y la cuenta).")
+    return (f"ATENCIÓN: {len(malas)} cuentas de tercero llegan con el nombre en claro, porque el "
+            "auditor apagó la seudonimización (--nombres-en-claro)."
+            if en_claro_por_el_auditor else
+            f"ATENCIÓN: {len(malas)} cuentas de tercero llegan con el nombre en claro.")
+
+
+# ── el estado de una comprobacion ──────────────────────────────────────────────
+# True cuadra, False NO CUADRA, None a tener en cuenta, y un cuarto: lo que esta INCOMPLETO
+# POR DISEÑO. «NO CUADRA» queda solo para los fallos aritmeticos. En la prueba en Cowork del
+# 20/10/2026 salia «NO CUADRA» en la propuesta del estado de flujos, que es un borrador a
+# proposito, y se leyo como un error en las cuentas del cliente. Lo incompleto lleva su propia
+# etiqueta: el estado de flujos sin ajustes aprobados esta SIN HACER, y la propuesta es un
+# BORRADOR. Ninguna de las dos es un descuadre, y ninguna es verde.
+SIN_HACER = "SIN HACER"
+BORRADOR = "BORRADOR"
+INCOMPLETO = (SIN_HACER, BORRADOR)
+
+
+def etiqueta(ok) -> str:
+    """La etiqueta de la columna Resultado de la hoja Comprobaciones."""
+    if ok is True:
+        return "CUADRA"
+    if ok is False:
+        return "NO CUADRA"
+    if ok in INCOMPLETO:
+        return ok
+    return "A TENER EN CUENTA"
+
+
+def lineas_entrega(comprobaciones: list) -> list:
+    """Lo que va en «PARA CONTAR AL ENTREGAR»: lo que no cuadra, lo que esta a medias y los avisos.
+
+    El titulo es la AFIRMACION que se comprueba, y aqui no hay columna de semaforo que lo
+    matice: pegarlo al detalle dejaba «El estado esta trabajado · NINGUNO esta aprobado», que
+    se lee al reves (25/09/2026). Cuando la comprobacion no se cumple, solo va el detalle.
+    """
+    return [f"{etiqueta(ok)}: {d}" for _, ok, d in comprobaciones if ok is not True]
+
+
+def frases_comprobacion(comprobaciones: list) -> list:
+    """Las filas de la hoja Comprobaciones, como frases para el bloque de uso de IA.
+
+    Van en el apartado de resultado, como comprobaciones de la herramienta y no como
+    verificacion del equipo. Cada una dice lo que SALIO: la afirmacion que se comprueba solo
+    se repite en afirmativo cuando se cumple (ver generar_efe.py, 25/09/2026); si no, va entre
+    comillas, detras de ATENCION y de lo que le pasa. Cuatro estados, como la hoja: True
+    cuadra, False no cuadra, SIN HACER o BORRADOR lo incompleto por diseño, y None a tener en
+    cuenta. ATENCION solo cuando algo no cuadra o falta; lo que cuadra va sin ella.
+    """
+    res = []
+    for afirmacion, ok, detalle in comprobaciones:
+        d = texto(detalle).rstrip(".")
+        d = d[:1].upper() + d[1:]
+        if ok is True:
+            res.append(f"{afirmacion}. {d}.")
+        elif ok is False:
+            res.append(f"ATENCIÓN, no cuadra: «{afirmacion}» no se cumple. {d}.")
+        elif ok == SIN_HACER:
+            res.append(f"ATENCIÓN, sin hacer: «{afirmacion}» no se cumple todavía. {d}.")
+        elif ok == BORRADOR:
+            res.append(f"ATENCIÓN, es un borrador: «{afirmacion}» no se cumple. {d}.")
+        else:
+            res.append(f"ATENCIÓN, a tener en cuenta: «{afirmacion}» no se da por cumplida. {d}.")
+    return res
 
 
 def ejercicios(filas_auditorias: list) -> dict:

@@ -158,6 +158,11 @@ class Resumen:
     def flush(self):
         self.real.flush()
 
+    def solo_fichero(self, texto: str) -> None:
+        """Lo que va al resumen y NO a consola: una tabla larga que se lee del
+        fichero no tiene por que pasar tambien por la salida del script."""
+        self.trozos.append(texto)
+
     def guardar(self, ruta) -> None:
         from pathlib import Path as _P
         _P(ruta).write_text("".join(self.trozos), encoding="utf-8")
@@ -274,19 +279,41 @@ def anio_master(catalogo: dict):
     return 2000 + int(m.group(1)) if m else None
 
 
-def aviso_master(catalogo: dict, ejercicio=None):
-    """Texto de aviso si el master no parece el del ejercicio auditado."""
+def _anios(catalogo: dict, ejercicio) -> tuple:
     anio = anio_master(catalogo)
     try:
         ejercicio = int(str(ejercicio)[:4])
     except (TypeError, ValueError):
         ejercicio = None
-    if not anio or not ejercicio or anio == ejercicio:
+    return anio, ejercicio
+
+
+def aviso_master(catalogo: dict, ejercicio=None):
+    """Texto de aviso si el master es ANTERIOR al ejercicio auditado.
+
+    Solo ese caso es aviso: es como se llego a leer el master de 2021 en un encargo
+    de 2025. Un master POSTERIOR al ejercicio es lo normal y va por nota_master():
+    las firmas mantienen solo el master vigente, asi que auditar 2024 con el de 2025
+    es lo habitual (decidido tras el registro del 21/10/2026, donde contaba como
+    aviso, daba salida 1 y llegaba al informe en una ejecucion correcta).
+    """
+    anio, ejercicio = _anios(catalogo, ejercicio)
+    if not anio or not ejercicio or anio >= ejercicio:
         return None
     return ("el catálogo es del máster de " + str(anio) + " y el ejercicio auditado "
-            "es " + str(ejercicio) + ". Los riesgos, su numeración y sus "
+            "es " + str(ejercicio) + ", posterior. Los riesgos, su numeración y sus "
             "procedimientos cambian de un máster a otro: comprueba que es el máster "
             "que quieres antes de firmar el papel.")
+
+
+def nota_master(catalogo: dict, ejercicio=None):
+    """Linea informativa si el master es posterior al ejercicio auditado. No es aviso."""
+    anio, ejercicio = _anios(catalogo, ejercicio)
+    if not anio or not ejercicio or anio <= ejercicio:
+        return None
+    return ("catálogo del máster vigente (" + str(anio) + "); el ejercicio auditado es "
+            + str(ejercicio) + ": es lo habitual, la firma mantiene solo el máster "
+            "vigente")
 
 
 def riesgo_legible(r: dict, con_procedimientos: bool = False) -> dict:

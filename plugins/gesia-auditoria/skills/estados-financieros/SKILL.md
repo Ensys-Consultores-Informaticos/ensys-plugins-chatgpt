@@ -71,7 +71,10 @@ variables de shell: en Windows el intérprete no siempre es el mismo y una varia
 funciona en una consola no existe en la otra.
 
 - `<PLUGIN>` — la raíz del plugin instalado
-- `<TRABAJO>` — una carpeta de trabajo local para esta sesión, fuera del expediente
+- `<TRABAJO>` — una carpeta de trabajo local NUEVA para esta ejecución, con el nombre del
+  procedimiento y la hora, fuera del expediente. No reutilices la de otro procedimiento ni la
+  de otra conversación: los ficheros de trabajo se pisarían. Entrega los papeles por su nombre
+  exacto, nunca con un comodín, y al terminar bórrala; si no se deja, di su ruta exacta.
 
 **ChatGPT Cowork corre en el equipo del auditor**: los scripts y el MCP comparten disco, así
 que lo que exporta el MCP lo leen los scripts directamente y el papel se escribe en la ruta
@@ -84,21 +87,34 @@ del expediente sin pasos intermedios.
 ### Paso 1 — Expediente
 
 ```
-configurar(perfil = "estados-financieros")   # primero: nombres de terceros tokenizados
+configurar(perfil = "estados-financieros")   # primero: nombres de terceros seudonimizados
+contexto_expediente()                        # siempre, después del perfil
 ```
 
-**Lo primero, antes de exportar nada: el perfil.** Con él, el MCP **tokeniza los nombres de
+**Lo primero, antes de exportar nada: el perfil.** Con él, el MCP **seudonimiza los nombres de
 terceros** en todo lo que exporta: en `cuentas.json` las cuentas de proveedores y clientes
 salen como `PROV 40000012` o `CLI 43000007` en vez de su razón social, y el papel los recupera
 al final con `rehidratar`. Trabaja y habla por cuenta y por token; **nunca preguntes al auditor
 a quién corresponde un token ni lo adivines**. Si un script para con «NOMBRE EN CLARO», faltó
-el perfil: ponlo, borra lo exportado con `limpiar_exportaciones()` y repite la exportación. Solo
+el perfil: ponlo, borra lo exportado con `limpiar_exportaciones(procedimiento =
+"estados-financieros")` y repite la exportación. Solo
 si `configurar()` dice `nombres_terceros: en claro — forzado por el auditor`, lo ha apagado él:
 entonces pasa `--nombres-en-claro` a los scripts, y no lo vuelvas a encender tú.
+
+El perfil marca también **el comienzo del procedimiento**: desde ahí el MCP lleva la cuenta de
+lo que facilita a la herramienta, que es lo que cada papel dirá en su hoja «Uso de IA». Por eso,
+**justo después del perfil, llama siempre a `contexto_expediente()`, aunque ya lo tengas** de
+antes en la conversación: lo que se leyó con otro perfil, o sin ninguno, no cuenta como
+facilitado para estos papeles.
 
 `configurar()` te devuelve además el estado. Si no hay expediente, pide la ruta del
 `.gs3`. Si responde que el servidor API no contesta, **llama a `arrancar_api`**: lo levanta en
 el equipo del auditor y sigues. No le pidas a él que lo arranque a mano.
+
+**Si `configurar()` avisa de que otra conversación está trabajando con otro expediente o con
+otro perfil en el mismo servidor**, díselo al auditor tal cual y **no sigas hasta que
+confirme**. Las dos conversaciones comparten el MCP y se pisan: lo que configura una cambia el
+expediente o el perfil con que trabaja la otra.
 
 Quédate con el nombre del cliente y con la correspondencia de ejercicios:
 
@@ -183,6 +199,18 @@ Salida `0` → todo encaja.
 
 ### Paso 5 — El papel de trabajo
 
+**Si algún papel ya existe, una sola pregunta para todos, antes del primero.** Mira si en
+`<expediente>\AsistenteIA\EstadosFinancieros\` ya está alguno de los cuatro de este skill
+—«Estados Financieros», «Patrimonio Neto», «Flujos de Efectivo» y «Propuesta EFE», con el
+cliente y el ejercicio—. Si hay alguno, **pregunta al auditor una vez**,
+diciendo cuáles: sobrescribirlos, o guardar los de esta ejecución con « (rehecho AAAA-MM-DD)»
+antes de la extensión, con la fecha de hoy; lo que elija vale para todos los que salgan, y con
+el sufijo lo llevan todos, para que se vea que van juntos. Ni los sobrescribas sin preguntar ni
+inventes otro sufijo: al repetir un procedimiento el mismo día, una ejecución pisó el papel y otra
+improvisó el nombre (registro del 21/10/2026). Los nombres elegidos son los de todo lo que sigue
+—los `--salida` de los pasos 5 a 5 quater, el
+sello y la recuperación de nombres—.
+
 ```bash
 python "<PLUGIN>\skills\estados-financieros\scripts\generar_papel.py" \
   --estructura "<TEMP>/gesia-eeff/estructura.json" \
@@ -190,14 +218,31 @@ python "<PLUGIN>\skills\estados-financieros\scripts\generar_papel.py" \
   --ejercicios "<TEMP>/gesia-eeff/ejercicios.json" \
   --cliente    "<razón social del expediente>" \
   --ejercicio  "<año del ejercicio corriente>" \
+  --generado   "<fecha de hoy, dd/mm/aaaa>" \
   --salida     "<expediente>/AsistenteIA/EstadosFinancieros/Estados Financieros <CLIENTE> <EJERCICIO>.xlsx"
 ```
 
-Cinco hojas: **Balance**, **PyG**, **Conciliacion**, **Ajustes** y **Comprobaciones**.
+`--generado` es la fecha de hoy, que conoces por tu contexto, y la llevan los cuatro scripts de
+este skill. **La pones tú**: nada en este skill lee el reloj.
+
+Seis hojas: **Uso de IA**, **Balance**, **PyG**, **Conciliacion**, **Ajustes** y
+**Comprobaciones**.
+
+**Cada papel de este skill empieza por la hoja «Uso de IA»**, la suya: la evidencia de que se
+hizo con una herramienta de inteligencia artificial, de qué se le facilitó, de lo que comprobó
+el propio script y de cómo podría verificarse, y cada hoja del papel lleva la marca «Uso de IA:
+pendiente de verificación». Los apartados de la herramienta quedan con huecos que se rellenan al
+archivar (paso 6); los de verificación, verificado por, efecto en la conclusión y revisión **son
+del equipo y salen en blanco**. No escribas nada en ellos ni propongas texto para ellos.
 
 Si el script termina con salida `1`, imprime una sección **«PARA CONTAR AL ENTREGAR (tal cual,
 sin resumir)»**. Esas líneas van al auditor **literales, todas**, no resumidas con tus
 palabras.
+
+En las hojas Comprobaciones de los cuatro papeles, **«NO CUADRA» es siempre un fallo
+aritmético**. Lo que está a medias por diseño lleva su propia etiqueta y no es un descuadre:
+**«SIN HACER»** el estado de flujos sin ajustes aprobados, y **«BORRADOR»** la propuesta de
+ajustes. No los cuentes como descuadres, ni los des por buenos porque el resto salga en verde.
 
 ### Paso 5 bis — El papel de patrimonio neto
 
@@ -205,10 +250,10 @@ palabras.
 que no hay motivo para dejarlo a que al auditor se le ocurra pedirlo.
 
 ```bash
-python "<PLUGIN>\skills\estados-financieros\scripts\generar_ecpn.py"   --estructura "<TEMP>/gesia-eeff/estructura.json"   --cuentas    "<TEMP>/gesia-eeff/cuentas.json"   --ejercicios "<TEMP>/gesia-eeff/ejercicios.json"   --cliente    "<razón social del expediente>"   --ejercicio  "<año del ejercicio corriente>"   --salida     "<expediente>/AsistenteIA/EstadosFinancieros/Patrimonio Neto <CLIENTE> <EJERCICIO>.xlsx"
+python "<PLUGIN>\skills\estados-financieros\scripts\generar_ecpn.py"   --estructura "<TEMP>/gesia-eeff/estructura.json"   --cuentas    "<TEMP>/gesia-eeff/cuentas.json"   --ejercicios "<TEMP>/gesia-eeff/ejercicios.json"   --cliente    "<razón social del expediente>"   --ejercicio  "<año del ejercicio corriente>"   --generado   "<fecha de hoy, dd/mm/aaaa>"   --salida     "<expediente>/AsistenteIA/EstadosFinancieros/Patrimonio Neto <CLIENTE> <EJERCICIO>.xlsx"
 ```
 
-Cuatro hojas: **PatrimonioNeto**, **Movimiento**, **Detalle** y **Comprobaciones**.
+Cinco hojas: **Uso de IA**, **PatrimonioNeto**, **Movimiento**, **Detalle** y **Comprobaciones**.
 
 **Gesia no tiene módulo de ECPN.** Está comprobado sobre el ejecutable: los nombres de tabla
 que aparecen en su propio SQL son los del balance, la PyG, la PyG analítica, las cuentas
@@ -236,10 +281,12 @@ pidan: lo que decide es el dato, y comprobarlo cuesta una exportación.
 variaciones de balance él solo en cuanto hay dos ejercicios cargados, así que un cuadro con
 importes no significa que nadie haya trabajado el estado. Medido en un expediente terminado de
 modelo reducido: 159 líneas con importe y cero ajustes aprobados, porque formulando abreviado
-no está obligado a presentarlo y el auditor ni lo empezó. Ahí **no se hace el papel**: se dice
-en una línea al entregar y se acabó.
+no está obligado a presentarlo y el auditor ni lo empezó. Ahí el papel sale igual, pero dice
+que el estado está **SIN HACER** (más abajo).
 
-Así que primero el catálogo, que es la exportación que responde a la pregunta:
+Así que primero el cuadro y el catálogo de ajustes, que son las exportaciones que responden a la
+pregunta. Son las dos únicas del estado de flujos: el catálogo sirve también para la propuesta
+del paso 5 quater.
 
 ```
 exportar_consulta(
@@ -251,15 +298,20 @@ exportar_consulta(
 
 exportar_consulta(
   sql = "SELECT a.NumeroAsientoOA, a.Fecha, a.Descripcion,
-                a.GeneracionFondos AS Aprobado, p.ApunteOA, p.Cuenta, p.Concepto,
-                p.Contrapartida, p.Origen, p.Aplicacion
+                a.GeneracionFondos AS Aprobado, a.Observaciones, p.ApunteOA, p.Cuenta,
+                p.Concepto, p.Contrapartida, p.Origen, p.Aplicacion
          FROM AsientosOA AS a
-         LEFT JOIN ApuntesOA AS p ON a.NumeroAsientoOA = p.NumeroAsientoOA",
-  ruta = "<TEMP>/gesia-eeff/ajustes_efe.json")
+         LEFT JOIN ApuntesOA AS p ON a.NumeroAsientoOA = p.NumeroAsientoOA
+         ORDER BY a.NumeroAsientoOA, p.ApunteOA",
+  ruta = "<TEMP>/gesia-eeff/catalogo.json")
 ```
 
 El `LEFT JOIN` es a propósito: así vienen también las plantillas del catálogo que nadie ha
 usado, y el papel puede decir cuántas hay frente a cuántas están aprobadas.
+
+`Observaciones` es el criterio de cada plantilla, escrito por quien montó el máster: dice de
+qué cuentas sale el importe y qué mirar. Es doctrina de la casa y la propuesta lo reproduce tal
+cual, sin resumirlo.
 
 **Cuenta los aprobados —`Aprobado` a `True`— antes de seguir**, porque es lo que decide qué
 estás entregando. Si no hay ninguno, el expediente **no tiene el estado de flujos hecho**:
@@ -268,8 +320,10 @@ mismo sin un solo ajuste del auditor.
 
 **Genera el papel igual** —enseña precisamente eso, que está sin hacer— y al entregar **lleva
 el aviso por delante**, antes que ninguna cifra: sin ajustes aprobados, eso no es un estado de
-flujos, y el verde de las demás comprobaciones no dice que lo esté. El script lo imprime en
-«PARA CONTAR AL ENTREGAR»: cópialo tal cual y **no lo resumas en «cuadra»**.
+flujos, y el verde de las demás comprobaciones no dice que lo esté. El papel lo marca como
+**«SIN HACER»** —no como «NO CUADRA»: no es un descuadre, es trabajo por hacer—, el script
+imprime `estado de flujos: SIN HACER` y lo repite en «PARA CONTAR AL ENTREGAR»: cópialo tal
+cual y **no lo resumas en «cuadra»**.
 
 **Y sigue con la propuesta, sin esperar a que te la pidan** (paso 5 quater). Es el caso
 normal, no la excepción: de nueve expedientes medidos el 25/09/2026, **ocho** tienen el
@@ -280,15 +334,16 @@ calcular él.
 ```bash
 python "<PLUGIN>\skills\estados-financieros\scripts\generar_efe.py" \
   --cuadro     "<TEMP>/gesia-eeff/cuadro.json" \
-  --ajustes    "<TEMP>/gesia-eeff/ajustes_efe.json" \
+  --ajustes    "<TEMP>/gesia-eeff/catalogo.json" \
   --estructura "<TEMP>/gesia-eeff/estructura.json" \
   --ejercicios "<TEMP>/gesia-eeff/ejercicios.json" \
   --cliente    "<razón social del expediente>" \
   --ejercicio  "<año del ejercicio corriente>" \
+  --generado   "<fecha de hoy, dd/mm/aaaa>" \
   --salida     "<expediente>/AsistenteIA/EstadosFinancieros/Flujos de Efectivo <CLIENTE> <EJERCICIO>.xlsx"
 ```
 
-Cuatro hojas: **FlujosEfectivo**, **Ajustes**, **Apuntes** y **Comprobaciones**.
+Cinco hojas: **Uso de IA**, **FlujosEfectivo**, **Ajustes**, **Apuntes** y **Comprobaciones**.
 
 **Cuatro cosas de este módulo que no se adivinan**, todas medidas y todas vigiladas por el
 papel:
@@ -301,7 +356,8 @@ papel:
    variaciones de balance él solo en cuanto hay dos ejercicios cargados. Sin ajustes aprobados
    eso no es un estado de flujos: es la aritmética del programa sin el criterio del auditor, y
    cuadra consigo mismo perfectamente. Pasa en uno de los dos expedientes de calibración, con
-   159 líneas con importe y cero ajustes aprobados. El papel lo dice en ámbar, arriba del todo.
+   159 líneas con importe y cero ajustes aprobados. El papel lo dice en ámbar, arriba del todo,
+   como «SIN HACER».
 3. **`Cuenta` y `Contrapartida` de un apunte NO son cuentas contables**: son líneas del propio
    estado. El ajuste es partida doble entre líneas del cuadro, y sus cobros tienen que igualar
    a sus pagos.
@@ -314,10 +370,13 @@ con el estado hecho: 685.252,52 € por los tres caminos.
 
 ### Paso 5 quater — Proponer los ajustes del estado de flujos
 
-**Automáticamente cuando el expediente no tiene ningún ajuste aprobado**, y también si el
-auditor lo pide. Siempre **después** del papel de flujos, porque ahí se ve qué falta.
+**Automáticamente cuando el expediente no tiene ningún ajuste aprobado**, sin esperar a que te
+la pidan; con ajustes aprobados, solo si el auditor la pide. Siempre **después** del papel de
+flujos, porque ahí se ve qué falta. Si el cuadro está vacío —modelo de pymes— no hay nada que
+proponer.
 
-**Lo que sale es un BORRADOR, y así hay que entregarlo.** Medido contra el único expediente
+**Lo que sale es un BORRADOR, y así hay que entregarlo.** La hoja Comprobaciones lo marca como
+«BORRADOR», no como «NO CUADRA»: no es un error de nadie. Medido contra el único expediente
 que tiene el estado terminado: de los diez ajustes que aprobó el auditor, estas reglas
 aciertan **cuatro** —y no fallan ninguna— pero cubren el **32 %** del importe movido. Los seis
 que faltan son los grandes: impuesto de sociedades, ventas de inmovilizado, provisiones,
@@ -332,22 +391,9 @@ Así que al entregar, **por delante de cualquier cifra**, tres cosas:
    tiene que calcular, y decírselo es la mitad del valor del papel.
 3. **Que no va a cuadrar, y que no cuadra porque está a medias**, no porque haya un error en
    las cuentas del cliente. Si esto no se dice, el descuadre se atribuye al cliente.
-Necesita el catálogo de plantillas **con su criterio**, que es una exportación más:
 
-```
-exportar_consulta(
-  sql = "SELECT a.NumeroAsientoOA, a.Descripcion, a.GeneracionFondos AS Aprobado,
-                a.Observaciones, p.ApunteOA, p.Cuenta, p.Concepto, p.Contrapartida,
-                p.Origen, p.Aplicacion
-         FROM AsientosOA AS a
-         LEFT JOIN ApuntesOA AS p ON a.NumeroAsientoOA = p.NumeroAsientoOA
-         ORDER BY a.NumeroAsientoOA, p.ApunteOA",
-  ruta = "<TEMP>/gesia-eeff/catalogo.json")
-```
-
-`Observaciones` es el criterio de cada plantilla, escrito por quien montó el máster: dice de
-qué cuentas sale el importe y qué mirar. Es doctrina de la casa y el papel lo reproduce tal
-cual, sin resumirlo.
+Usa el `catalogo.json` del paso 5 ter, que ya trae el criterio de cada plantilla
+(`Observaciones`): **no hace falta otra exportación**.
 
 ```bash
 python "<PLUGIN>\skills\estados-financieros\scripts\proponer_efe.py" \
@@ -356,10 +402,13 @@ python "<PLUGIN>\skills\estados-financieros\scripts\proponer_efe.py" \
   --cuadro   "<TEMP>/gesia-eeff/cuadro.json" \
   --cliente  "<razón social del expediente>" \
   --ejercicio "<año del ejercicio corriente>" \
+  --generado "<fecha de hoy, dd/mm/aaaa>" \
   --salida   "<expediente>/AsistenteIA/EstadosFinancieros/Propuesta EFE <CLIENTE> <EJERCICIO>.xlsx"
 ```
 
-Tres hojas: **Propuestas**, **Catalogo** y **Comprobaciones**.
+Cuatro hojas: **Uso de IA**, **Propuestas**, **Catalogo** y **Comprobaciones**. Aquí la hoja
+«Uso de IA» dice, con número e importe, **qué importes ha calculado la herramienta** y que es un
+borrador: es el único papel del skill con cifras que no salen tal cual del expediente.
 
 **Esto no escribe nada en Gesia**, que el MCP solo lee. Es una propuesta en papel, y al
 teclearla va **siempre como ajuste NO APROBADO y con «Asistente IA:» al principio de la
@@ -383,9 +432,19 @@ de cobros y pagos y no del gasto devengado), las provisiones (fueron por la 529,
 y la distribución de pérdidas, que se escribió por simetría y al probarla colaba el movimiento
 de las subvenciones como si fuera reparto del resultado. Cuadraba, y habría pasado por buena.
 
-Al entregar, di siempre estas dos cosas: **cuántas plantillas del catálogo llevan propuesta y
-cuántas no**, y que **donde el auditor ya puso el ajuste manda lo suyo**; si la propuesta no
-coincide con lo que hay en Gesia, eso es algo que entender, no algo que corregir.
+**Cada una de las cuatro reglas dice si se ha aplicado o por qué no.** El script las imprime
+bajo «reglas verificadas», una línea por regla: aplicada a qué plantilla y por cuánto, o el
+motivo concreto de que no —la 66 o la 76 sin saldo o fuera del plan, las dotaciones 68 a cero,
+la 129 abriendo a cero o deudora (pérdida del ejercicio anterior, variante sin calibrar), o que
+ninguna plantilla del catálogo tiene la forma de la regla—. **Cuéntalas las cuatro, tal cual.**
+Una plantilla con regla verificada que se queda sin importe no es lo mismo que una sin regla:
+en la hoja `Catalogo`, la columna «Regla y motivo» las separa —aplicada, «NO aplicada, porque…»
+en amarillo, o sin regla—, y en `Comprobaciones` van en filas distintas.
+
+Al entregar, di siempre estas dos cosas: **cuántas plantillas del catálogo llevan propuesta,
+cuántas tienen regla y no se aplicó —con el motivo— y cuántas no tienen regla**, y que **donde
+el auditor ya puso el ajuste manda lo suyo**; si la propuesta no coincide con lo que hay en
+Gesia, eso es algo que entender, no algo que corregir.
 
 ### Paso 6 — Entregar
 
@@ -397,30 +456,59 @@ no sabe que faltan tres.
 |---|---|---|
 | Estados financieros | siempre | — |
 | Patrimonio neto | siempre | — |
-| Flujos de efectivo | si hay ajustes aprobados en el módulo EFE | «el expediente no tiene el estado de flujos hecho: el cuadro está sin ajustes aprobados», o que es un modelo de pymes y no lo lleva |
-| Propuesta de ajustes del EFE | solo si el auditor la pide | nada: no se ofrece sola |
+| Flujos de efectivo | siempre que el módulo EFE tenga cuadro con cifras, con ajustes aprobados o sin ellos | que es un modelo de pymes y no lleva estado de flujos, o que el cuadro está a cero |
+| Propuesta de ajustes del EFE | sin ajustes aprobados, siempre (paso 5 quater); con ajustes aprobados, solo si el auditor la pide | con ajustes aprobados y sin pedirla, nada: no se ofrece sola. Sin estado de flujos, lo mismo que el papel de flujos |
+
+**Si el expediente tiene 0 ajustes aprobados, una línea propia, antes que las cifras de los
+papeles: «El estado de flujos NO está hecho: el expediente no tiene ningún ajuste aprobado; lo
+que cuadra es el cálculo de Gesia consigo mismo».** Sin ella, el verde de las demás
+comprobaciones se lee como «hecho».
 
 Y de cada papel que salga, en pocas líneas:
 
 - dónde está el fichero, con la ruta completa
 - qué ejercicios lleva el comparativo
 - cuántas cuentas tienen ajuste o reclasificación y cuántos epígrafes mueven
-- si todas las comprobaciones cuadran, o cuáles no
+- si todas las comprobaciones cuadran, o cuáles no; lo que salga «SIN HACER» o «BORRADOR» se
+  dice como lo que es, trabajo a medias, no como descuadre
 
 Y una advertencia que va siempre: **el papel es una lectura del expediente, no una opinión.**
 Que los epígrafes cuadren no dice que las cuentas sean correctas, dice que el expediente es
 internamente consistente.
 
-**Los nombres.** Los papeles se han escrito con tokens. Cuando cada uno esté ya en el disco del
-auditor, llama a `rehidratar(ruta = "<expediente>/AsistenteIA/EstadosFinancieros/<fichero>",
-leyenda = true)`: sustituye cada token por el nombre real, en local, y devuelve recuentos —ni un
-nombre vuelve aquí—. Hazlo con **todos** los que hayan salido; el de flujos puede no llevar
-ninguno, y eso no es un fallo. Cuéntale al auditor las sustituciones y los terceros distintos
-de cada papel y, si hay `tokens_sin_nombre`, dilos tal cual. Delante de él no lo llames
-«rehidratar»: para él es **desanonimizar**.**Aquí el papel es uno solo**: el del expediente. No hay copia de chat ni contenedor por el que viajar, así que en cuanto lo desanonimizas lleva los nombres reales en el disco del auditor. Dilo tal cual, para que sepa que ese fichero ya no es anónimo y trate el sitio donde lo deje en consecuencia.
+**Archivar cada papel.** Con cada papel **ya en el disco del auditor**, en
+`<expediente>\AsistenteIA\EstadosFinancieros\`, dos llamadas sobre esa ruta de Windows, en este
+orden o en el contrario, y con **todos** los papeles que hayan salido:
 
-**Los temporales.** Lo que haya escrito `exportar_consulta` lo borra `limpiar_exportaciones()`:
-funciona igual en local y en Cowork, porque lo borra el MCP en el equipo del auditor.
+1. **`sellar_uso_ia(ruta = "<expediente>/AsistenteIA/EstadosFinancieros/<fichero>", modelo =
+   "<el modelo con el que trabajas>", procedimiento = "estados-financieros")`**, una vez por
+   papel, cada uno por su nombre. Rellena en la hoja «Uso de IA» de ese papel lo que solo
+   sabe la aplicación: herramienta y versiones, quién lo ejecutó, dónde corrieron los scripts y
+   **qué información se facilitó y cómo**, según lo que el MCP ha servido desde el paso 1. En
+   `modelo` pon el nombre y la versión que te da tu propio contexto; si no lo sabes, déjalo
+   vacío. **Sin esta llamada el papel queda con huecos que dicen «pendiente»**: no se da por
+   entregado.
+2. **`rehidratar(ruta = "<expediente>/AsistenteIA/EstadosFinancieros/<fichero>", leyenda =
+   true)`.** Los papeles se han escrito con tokens: sustituye cada token por el nombre real, en
+   local, y devuelve recuentos —ni un nombre vuelve aquí—. El de flujos puede no llevar ninguno,
+   y eso no es un fallo. Cuéntale al auditor las sustituciones y los terceros distintos de cada
+   papel y, si hay `tokens_sin_nombre`, dilos tal cual: son cuentas que el diccionario no
+   conoce, no las completes tú.
+
+Delante del auditor no llames «rehidratar» ni «sellar» a nada: para él es **recuperar los
+nombres** y **dejar constancia del uso de IA**. Y dile siempre, de cada papel, que su hoja «Uso
+de IA» deja constancia de la herramienta y de lo que se le facilitó, y que **la verificación,
+quién la hace, su efecto en la conclusión y la revisión están en blanco para el equipo: mientras
+lo estén, el papel no es evidencia de auditoría**. **Aquí el papel es uno solo**: el del expediente. No hay copia de chat ni contenedor por el que viajar, así que en cuanto recuperas los nombres lleva los nombres reales en el disco del auditor. Dilo tal cual, para que sepa que ese fichero ya no está seudonimizado y trate el sitio donde lo deje en consecuencia.
+
+**Si en el paso 1 `configurar()` avisó de otra conversación** trabajando en el mismo servidor,
+recuérdaselo al auditor al entregar: lo que la hoja «Uso de IA» dice que se facilitó es lo que
+el MCP sirvió, y con dos conversaciones a la vez puede no ser solo lo de esta.
+
+**Los temporales.** Lo que haya escrito `exportar_consulta` lo borra
+`limpiar_exportaciones(procedimiento = "estados-financieros")`, que solo toca lo de este
+procedimiento y deja lo de otros skills: funciona igual en local y en Cowork, porque lo borra el
+MCP en el equipo del auditor.
 
 ---
 
@@ -450,6 +538,9 @@ funciona igual en local y en Cowork, porque lo borra el MCP en el equipo del aud
   `configurar(gs3_anterior=…)`.
 - **No escribe nada en Gesia.** El MCP solo lee.
 - **No proyecta, no valora y no opina sobre la empresa.**
+- **No verifica su propio resultado por el equipo.** Propone qué contrastar; la verificación,
+  quién la hace y su efecto en la conclusión los escribe el equipo en la hoja «Uso de IA» de
+  cada papel.
 
 ---
 
@@ -458,7 +549,8 @@ funciona igual en local y en Cowork, porque lo borra el MCP en el equipo del aud
 | Situación | Qué hace |
 |---|---|
 | El servidor API no responde | llama a `arrancar_api` y repite; solo si eso falla, se lo dice al auditor |
-| Un script para con «NOMBRE EN CLARO» | faltó el perfil: `configurar(perfil = "estados-financieros")`, `limpiar_exportaciones()` y exportar de nuevo |
+| `configurar` avisa de otra conversación con otro expediente o perfil en el mismo servidor | se lo dice al auditor y **no sigue** hasta que confirme |
+| Un script para con «NOMBRE EN CLARO» | faltó el perfil: `configurar(perfil = "estados-financieros")`, `limpiar_exportaciones(procedimiento = "estados-financieros")` y exportar de nuevo |
 | El expediente no tiene cifras cargadas en ningún ejercicio | **para**: no hay nada que revisar |
 | El balance descuadra en algún ejercicio | **para**: con un balance descuadrado no se emite papel, y se dice en qué ejercicio y por cuánto |
 | Los epígrafes de las cuentas no existen en la estructura | **para**: el mapeo no es de este modelo de cuentas |
@@ -472,11 +564,14 @@ funciona igual en local y en Cowork, porque lo borra el MCP en el equipo del aud
 | El cliente no usa los grupos 8 y 9 | sigue: lo dice en Comprobaciones como «A tener en cuenta», y avisa de que el estado de ingresos y gastos reconocidos hay que construirlo con el auditor |
 | `CuadroFinanciacion` viene vacía | **para el papel de flujos**: es un modelo de pymes y no lleva estado de flujos. Se dice y no se ofrece nada más |
 | El cuadro está a cero en todas sus líneas | **para**: el estado no se ha hecho |
-| El cuadro tiene cifras pero ningún ajuste aprobado | sigue y lo marca en ámbar arriba del todo: es la aritmética de Gesia sin el criterio del auditor, y cuadra igual |
+| El cuadro tiene cifras pero ningún ajuste aprobado | sigue y lo marca como «SIN HACER», en ámbar arriba del todo: es la aritmética de Gesia sin el criterio del auditor, y cuadra igual. Al entregar, la línea de que el estado no está hecho; y la propuesta sale sola |
 | Un ajuste aprobado descuadra (cobros ≠ pagos) | sigue y lo marca en rojo: el módulo tiene un «Descuadre» que debería estar a cero |
 | Ninguna plantilla del catálogo encaja con una regla verificada | sigue: el papel sale con la hoja Catalogo, que ya es útil, y lo dice |
 | La propuesta no coincide con un ajuste que el auditor ya aprobó | sigue y lo marca en rojo: manda lo del auditor, y la diferencia se entiende antes de tocar nada |
-| El resultado del ejercicio anterior fue pérdida | no se propone la distribución: esa variante no está calibrada contra ningún expediente |
+| El resultado del ejercicio anterior fue pérdida | no se propone la distribución: esa variante no está calibrada contra ningún expediente. La regla sale como «NO aplicada» con ese motivo |
+| Una plantilla tiene la forma de una regla pero la cuenta de la que sale el importe está a cero o no está en el plan | no se propone, y la regla lo dice con el motivo en la consola, en «Regla y motivo» del `Catalogo` y en `Comprobaciones`, aparte de las plantillas sin regla |
+| `sellar_uso_ia` dice que no hay huecos | el papel ya estaba sellado o no es el que escribió el script: no lo repitas, dilo |
+| `sellar_uso_ia` dice que no tiene constancia de lo facilitado | o no se sirvió nada por el plugin, o el MCP se reinició a mitad: el papel lo dice y remite a `RegistroEmision.jsonl`; cuéntaselo al auditor tal cual |
 
 ---
 

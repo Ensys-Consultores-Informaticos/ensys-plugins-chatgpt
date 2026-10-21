@@ -1,19 +1,25 @@
-"""Lectura del diario y mapeo de cuentas para la prueba de continuidad de saldos.
+"""Apertura del diario y mapeo de cuentas para la prueba de continuidad de saldos.
 
 No imprime: devuelve datos. Quien llama decide que hacer con ellos.
 
-El diario (.smn) es una base Access sin proteccion, asi que se lee con mdbtools
-dentro del contenedor. El expediente (.gs3) NO: es un .mdb con contrasena y solo
-se abre por el API de Gesia, asi que sus datos llegan en un JSON que prepara el
-modelo con el MCP. Ver docs/contrato-datos.md.
+Desde la 1.25.0 del MCP el diario NO sale entero del equipo del auditor. Antes el skill
+comprimia el .smn y lo subia al contenedor de Cowork para leerlo con mdbtools: todas las
+tablas y columnas, nombres y conceptos incluidos, para usar un solo asiento. Ahora el MCP
+exporta dos cosas pequenas y nada mas:
+
+  1. el FiltroDeApertura (campo Datos de CfgNormalizacion), con SQL_FILTRO;
+  2. el asiento de apertura, con la consulta que arma sql_apertura() a partir de ese
+     filtro: solo las columnas que la prueba usa, el filtro evaluado en JET como
+     POR_FILTRO, y los nombres de terceros seudonimizados por el perfil.
+
+Es la minimizacion del dato: a la herramienta solo va lo que el procedimiento necesita.
+El expediente (.gs3) llega igual que siempre, en el JSON que exporta el MCP.
+Ver docs/contrato-datos.md.
 """
 
 from __future__ import annotations
 
-import io
 import json
-import shutil
-import subprocess
 import sys
 from pathlib import Path
 
@@ -42,6 +48,13 @@ OPERADORES = {
     "termina por": "termina",
 }
 
+# El filtro vive en CfgNormalizacion, en el registro cuyo Concepto es FiltroDeApertura.
+# Solo se pide Datos: Concepto se llama como la columna del diario que el MCP retiene.
+SQL_FILTRO = "SELECT Datos FROM CfgNormalizacion WHERE Trim(Concepto) = 'FiltroDeApertura'"
+
+# Las columnas del diario que la prueba usa. Ni CONCEPTO ni ninguna otra.
+COLUMNAS_APERTURA = ("FECHA", "ASIENTO", "CUENTA", "NOMBRE", "DEBE", "HABER")
+
 
 def salida_utf8() -> None:
     """La consola de Windows no es UTF-8 por defecto y parte los acentos."""
@@ -51,85 +64,11 @@ def salida_utf8() -> None:
             f.reconfigure(encoding="utf-8")
 
 
-def _hay_mdbtools() -> bool:
-    return shutil.which("mdb-tables") is not None
-
-
-def _conexion_odbc(ruta):
-    """Lector alternativo para Windows, donde no hay mdbtools.
-
-    El proyecto esta pensado para Cowork, donde el diario se sube al contenedor y
-    se lee con mdbtools. Pero el skill tambien tiene que poder ejecutarse en la
-    maquina del auditor, y ahi el camino es el driver de Access de 64 bits, el
-    mismo que usa el MCP. Es un camino alternativo, no un requisito nuevo: si
-    mdbtools esta, se usa mdbtools.
-    """
-    import pyodbc
-
-    cadena = (
-        "DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=" + str(ruta) + ";"
-    )
-    return pyodbc.connect(cadena, readonly=True)
-
-
-def _ejecutar(cmd: list) -> str:
-    try:
-        res = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-    except FileNotFoundError:
-        raise RuntimeError(
-            "No se encuentra " + cmd[0] + " (hacen falta mdb-tables y mdb-export)"
-        )
-    except subprocess.TimeoutExpired as exc:
-        raise RuntimeError(cmd[0] + " ha agotado el tiempo") from exc
-    if res.returncode != 0:
-        raise RuntimeError(cmd[0] + " ha fallado: " + res.stderr.strip())
-    return res.stdout
-
-
-def tablas(ruta) -> list:
-    if _hay_mdbtools():
-        return [t for t in _ejecutar(["mdb-tables", "-1", str(ruta)]).split("\n") if t]
-    con = _conexion_odbc(ruta)
-    try:
-        return [f.table_name for f in con.cursor().tables(tableType="TABLE")]
-    finally:
-        con.close()
-
-
-def _localizar_tabla(ruta, nombre: str):
-    """Devuelve el nombre real de una tabla, sin distinguir mayusculas, o None."""
-    for t in tablas(ruta):
-        if t.strip().lower() == nombre.strip().lower():
-            return t
-    return None
-
-
-def _exportar(ruta, tabla: str) -> pd.DataFrame:
-    """Trae una tabla entera como texto. Todo str: convertir es de quien escribe."""
-    if _hay_mdbtools():
-        csv = _ejecutar(["mdb-export", "-D", "%Y-%m-%d", str(ruta), tabla])
-        return pd.read_csv(io.StringIO(csv), dtype=str, keep_default_na=False)
-
-    con = _conexion_odbc(ruta)
-    try:
-        cur = con.cursor()
-        cur.execute("SELECT * FROM [" + tabla + "]")
-        cols = [d[0] for d in cur.description]
-        filas = [
-            ["" if v is None else str(v) for v in fila] for fila in cur.fetchall()
-        ]
-    finally:
-        con.close()
-    return pd.DataFrame(filas, columns=cols, dtype=str)
-
-
-def leer_filtro_apertura(ruta) -> dict:
-    """Lee el FiltroDeApertura de cfgnormalizacion y lo traduce.
+def interpretar_filtro(crudo: str) -> dict:
+    """Traduce el texto del FiltroDeApertura.
 
     El asiento de apertura se fija al normalizar el diario y NO tiene que ser el
-    numero 1: en el expediente de calibracion era el 3495. La identificacion vive en
-    cfgnormalizacion, en el registro cuyo Concepto es FiltroDeApertura, con el
-    filtro en el campo Datos y esta forma:
+    numero 1: en el expediente de calibracion era el 3495. El filtro tiene esta forma:
 
         CAMPO|Tipo|Operador|Valor||| descripcion legible
 
@@ -137,37 +76,11 @@ def leer_filtro_apertura(ruta) -> dict:
     El ejemplo de partida era por ASIENTO, asi que el campo, el operador y el
     valor son todos variables y hay que leerlos, no suponerlos.
 
-    Devuelve {campo, tipo, operador, valor, crudo}, o {ausente: True, motivo}
-    si la tabla, el registro o el operador no permiten seguir.
+    Devuelve {campo, tipo, operador, valor, crudo}, o {ausente: True, motivo}.
     """
-    # El nombre real es 'CfgNormalizacion' con mayusculas, pero Access no
-    # distingue el caso en SQL y Python si: comparar en minusculas o el skill
-    # decide que el diario no tiene la tabla que si tiene.
-    tabla = _localizar_tabla(ruta, "cfgnormalizacion")
-    if tabla is None:
-        return {"ausente": True, "motivo": "el diario no tiene tabla CfgNormalizacion"}
-
-    cfg = _exportar(ruta, tabla)
-    if "Concepto" not in cfg.columns or "Datos" not in cfg.columns:
-        return {
-            "ausente": True,
-            "motivo": "cfgnormalizacion no tiene las columnas Concepto y Datos",
-        }
-
-    filas = cfg[cfg["Concepto"].str.strip().str.lower() == "filtrodeapertura"]
-    if filas.empty:
-        return {"ausente": True, "motivo": "cfgnormalizacion no tiene FiltroDeApertura"}
-    if len(filas) > 1:
-        return {
-            "ausente": True,
-            "motivo": "hay " + str(len(filas)) + " FiltroDeApertura, se esperaba 1",
-        }
-
-    crudo = filas.iloc[0]["Datos"]
-    partes = crudo.split("|")
+    partes = str(crudo or "").split("|")
     if len(partes) < 4:
         return {"ausente": True, "motivo": "filtro ilegible: " + repr(crudo)}
-
     operador = partes[2].strip().lower()
     if operador not in OPERADORES:
         return {
@@ -178,9 +91,12 @@ def leer_filtro_apertura(ruta) -> dict:
             ),
             "crudo": crudo,
         }
-
+    campo = partes[0].strip()
+    # el campo va a parar a una consulta: solo un nombre de columna, nada mas
+    if not campo.replace("_", "").isalnum():
+        return {"ausente": True, "motivo": "campo de filtro raro: " + repr(campo), "crudo": crudo}
     return {
-        "campo": partes[0].strip(),
+        "campo": campo,
         "tipo": partes[1].strip(),
         "operador": operador,
         "valor": partes[3].strip(),
@@ -188,15 +104,88 @@ def leer_filtro_apertura(ruta) -> dict:
     }
 
 
+def leer_filtro(ruta) -> dict:
+    """Lee el FiltroDeApertura del fichero que deja exportar_consulta con SQL_FILTRO."""
+    try:
+        filas = json.loads(Path(ruta).read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        return {"ausente": True, "motivo": "no se puede leer el filtro exportado: " + str(exc)}
+    if not isinstance(filas, list):
+        return {"ausente": True, "motivo": "el fichero del filtro no es una lista de filas"}
+    if not filas:
+        return {"ausente": True, "motivo": "CfgNormalizacion no tiene FiltroDeApertura"}
+    if len(filas) > 1:
+        return {"ausente": True,
+                "motivo": "hay " + str(len(filas)) + " FiltroDeApertura, se esperaba 1"}
+    clave = next((k for k in filas[0] if str(k).lower() == "datos"), None)
+    if clave is None:
+        return {"ausente": True, "motivo": "la fila del filtro no trae la columna Datos"}
+    return interpretar_filtro(filas[0][clave])
+
+
+def condicion_jet(filtro: dict) -> str:
+    """El filtro como condicion de JET, con la misma semantica que aplicar_filtro():
+    texto sin espacios a los lados y sin distinguir mayusculas; un nulo es texto vacio."""
+    campo = "[" + filtro["campo"] + "]"
+    col = "LCase(Trim(IIf(IsNull(" + campo + "), '', " + campo + ")))"
+    valor = filtro["valor"].lower().replace("'", "''")
+    op = OPERADORES[filtro["operador"]]
+    if op in ("==", "!="):
+        return col + (" = " if op == "==" else " <> ") + "'" + valor + "'"
+    # en LIKE, % y _ son comodines: el valor se escapa entre corchetes
+    lit = valor.replace("[", "[[]").replace("%", "[%]").replace("_", "[_]")
+    patron = {"contiene": "%" + lit + "%", "empieza": lit + "%", "termina": "%" + lit}[op]
+    return col + " LIKE '" + patron + "'"
+
+
+def sql_apertura(filtro: dict, con_campo_apertura: bool = True) -> str:
+    """La consulta del asiento de apertura: lo que el filtro selecciona y, si el diario
+    trae el campo APERTURA, tambien lo que ese campo marca, para la comprobacion C06."""
+    cond = condicion_jet(filtro)
+    cols = ", ".join(COLUMNAS_APERTURA)
+    if con_campo_apertura:
+        return ("SELECT " + cols + ", APERTURA, IIf(" + cond + ", 1, 0) AS POR_FILTRO "
+                "FROM Diario WHERE (" + cond + ") OR (APERTURA <> 0)")
+    return "SELECT " + cols + ", 1 AS POR_FILTRO FROM Diario WHERE " + cond
+
+
+def _numerica(serie: pd.Series) -> pd.Series:
+    return (pd.to_numeric(serie.astype(str).str.replace(",", ".", regex=False), errors="coerce")
+            .fillna(0.0).round(DECIMALES))
+
+
+def cargar_apertura(ruta) -> pd.DataFrame:
+    """Trae el asiento de apertura exportado, con los importes numericos y POR_FILTRO
+    como booleano. Las columnas se normalizan a mayusculas."""
+    filas = json.loads(Path(ruta).read_text(encoding="utf-8"))
+    if not isinstance(filas, list):
+        raise RuntimeError("el fichero de apertura no es una lista de filas")
+    df = pd.DataFrame(filas)
+    df.columns = [str(c).upper() for c in df.columns]
+    for col in ("DEBE", "HABER", "APERTURA"):
+        if col in df.columns:
+            df[col] = _numerica(df[col])
+    if "POR_FILTRO" in df.columns:
+        df["POR_FILTRO"] = _numerica(df["POR_FILTRO"]) != 0
+    for col in ("CUENTA", "ASIENTO", "NOMBRE"):
+        if col in df.columns:
+            df[col] = df[col].fillna("").astype(str).str.strip()
+    # el ASIENTO llega numerico desde ODBC: 3495.0 se escribe 3495
+    if "ASIENTO" in df.columns:
+        df["ASIENTO"] = df["ASIENTO"].str.replace(r"\.0$", "", regex=True)
+    return df
+
+
 def aplicar_filtro(df: pd.DataFrame, filtro: dict) -> pd.Series:
-    """Traduce el filtro leido a una mascara booleana sobre el diario."""
+    """El filtro sobre un diario completo en pandas. Ya no lo usa la prueba -lo evalua JET
+    al exportar-: lo usa el arnes para comprobar que condicion_jet() selecciona lo mismo."""
     campo = filtro["campo"]
     if campo not in df.columns:
         raise RuntimeError(
             "el filtro de apertura usa el campo " + repr(campo) + ", que no existe "
             "en el diario. Columnas: " + str(sorted(df.columns))
         )
-    col = df[campo].astype(str).str.strip().str.lower()
+    col = df[campo].fillna("").astype(str).str.strip().str.lower()
     valor = filtro["valor"].lower()
     op = OPERADORES[filtro["operador"]]
     if op == "==":
@@ -208,31 +197,6 @@ def aplicar_filtro(df: pd.DataFrame, filtro: dict) -> pd.Series:
     if op == "empieza":
         return col.str.startswith(valor)
     return col.str.endswith(valor)
-
-
-def hay_diario(ruta) -> bool:
-    return _localizar_tabla(ruta, "Diario") is not None
-
-
-def cargar_diario(ruta) -> pd.DataFrame:
-    """Trae el Diario con los importes ya numericos y redondeados."""
-    tabla = _localizar_tabla(ruta, "Diario")
-    if tabla is None:
-        raise RuntimeError("el fichero no tiene tabla Diario")
-    df = _exportar(ruta, tabla)
-    for col in ("DEBE", "HABER", "APERTURA", "SALDO"):
-        if col in df.columns:
-            df[col] = (
-                pd.to_numeric(
-                    df[col].str.replace(",", ".", regex=False), errors="coerce"
-                )
-                .fillna(0.0)
-                .round(DECIMALES)
-            )
-    for col in ("CUENTA", "CONCEPTO", "ASIENTO", "NOMBRE"):
-        if col in df.columns:
-            df[col] = df[col].astype(str).str.strip()
-    return df
 
 
 def saldos_apertura(df: pd.DataFrame, mascara: pd.Series) -> pd.DataFrame:

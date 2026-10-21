@@ -9,7 +9,7 @@ Hay **dos plugins** y se instala **uno solo**:
 | Plugin | Para quién | Qué lleva |
 |---|---|---|
 | **Gesia — Expediente de auditoría** | Quien tiene la suite de Gesia | Todos los procedimientos de este canal, incluidas las pruebas de muestreo de ForSampling |
-| **ForSampling — Pruebas de muestreo** | Quien tiene ForSampling sin Gesia | Las pruebas de muestreo, el papel de la NIA-ES 530 y el registro de ejecución |
+| **ForSampling — Pruebas de muestreo** | Quien tiene ForSampling sin Gesia | Las pruebas de muestreo y el registro de ejecución |
 
 Los dos comparten el programa que lee los ficheros, y con los dos activos no se sabe cuál
 contesta. Si pasa, `configurar` lo avisa y dice cuál sobra.
@@ -78,19 +78,30 @@ Gesia lleva todos.
 | `identificacion-riesgos` | Elige los riesgos del catálogo del máster conforme a la NIA-ES 315 | — |
 | `fsp-cumplimiento` | Valida la muestra de una prueba de cumplimiento de ForSampling contra las facturas escaneadas | Sí |
 | `fsp-mum` | Lo mismo para una prueba de muestreo por unidad monetaria | Sí |
-| `fsp-mum-nia530` | Redacta en Word el papel de trabajo de la NIA-ES 530 de una prueba MUM, leído de los ficheros de ForSampling; la conclusión queda en blanco, que es del auditor | Sí |
 | `registro-ejecucion` | Escribe en el chat cómo ha ido la ejecución, para reportar incidencias | Sí |
 
 Dos procedimientos que sí están en el canal de Claude **no se distribuyen aquí**: el cuadro
 de mando del diario, pendiente de rehacerse, y la investigación de la entidad en fuentes
 públicas, que necesita subagentes y Codex no los tiene.
 
+**Cada papel deja constancia del uso de IA.** Lleva una hoja o un apartado «Utilización de
+herramientas de inteligencia artificial» con la herramienta y su versión, lo que se le pidió,
+qué información del cliente se le facilitó y cómo —seudonimizada o en claro—, el resultado y
+lo que comprobó ella misma. La verificación, quién la hace, su efecto en la conclusión y la
+revisión quedan **en blanco para el equipo**: mientras lo estén, el papel lo avisa y no es
+evidencia de auditoría.
+
+**Un procedimiento de Gesia a la vez.** Las conversaciones abiertas pueden compartir el mismo
+programa que lee el expediente: si lanzas dos procedimientos en dos conversaciones a la vez, se
+pisan el expediente activo y los ficheros de trabajo. Termina uno antes de empezar otro. Si el
+asistente te avisa de que otra conversación está trabajando, ciérrala o espera a que acabe.
+
 ## Qué sale del equipo y qué no
 
 Es lo que no se puede deducir mirando el resultado, así que conviene saberlo para usar el
 plugin con criterio:
 
-- **Los nombres de proveedores y clientes viajan anonimizados.** El asistente ve un código
+- **Los nombres de proveedores y clientes viajan seudonimizados.** El asistente ve un código
   por cuenta, no la razón social, y el papel de trabajo recupera los nombres reales en tu
   equipo al entregarlo.
 - **Las facturas escaneadas se tachan en tu equipo antes de subirlas.** Los PDF no salen de

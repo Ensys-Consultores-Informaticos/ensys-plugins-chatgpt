@@ -3,7 +3,8 @@
 No fiarse de la documentacion: lo que se asume, se comprueba. Un papel de trabajo
 bonito sobre datos mal entendidos es peor que no tener papel.
 
-    python verificar_contrato.py --diario diario.mdb --cierre cierre.json
+    python verificar_contrato.py --filtro filtro.json --apertura apertura.json \
+        --cierre cierre.json
 
 Codigos de salida:
   0  todo encaja
@@ -15,18 +16,18 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
-from lib_continuidad import (
+# La carpeta del script, explicita: lanzado con `python -I` no esta en sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib_continuidad import (  # noqa: E402
     DECIMALES,
     GRUPOS_BALANCE,
-    aplicar_filtro,
-    cargar_diario,
+    cargar_apertura,
     leer_cierre,
-    hay_diario,
-    leer_filtro_apertura,
+    leer_filtro,
     saldos_apertura,
     salida_utf8,
-    tablas,
 )
 
 # Tolerancia para dar por cuadrado un asiento. Dos decimales es el redondeo del
@@ -34,13 +35,15 @@ from lib_continuidad import (
 # un porcentaje: un descuadre real en un asiento de apertura no es proporcional.
 TOLERANCIA = 0.01
 
-COLUMNAS_MINIMAS = ("CUENTA", "DEBE", "HABER")
+COLUMNAS_MINIMAS = ("CUENTA", "ASIENTO", "DEBE", "HABER", "POR_FILTRO")
 
 
 def main() -> int:
     salida_utf8()
     p = argparse.ArgumentParser()
-    p.add_argument("--diario", required=True, help="el .mdb/.smn ya en el contenedor")
+    p.add_argument("--filtro", required=True, help="JSON exportado con SQL_FILTRO")
+    p.add_argument("--apertura", required=True,
+                   help="JSON exportado con la consulta de consulta_apertura.py")
     p.add_argument("--cierre", required=True, help="JSON con el cierre auditado")
     p.add_argument("--ejercicio", default="",
                    help="ejercicio auditado; obligatorio si el cierre son filas crudas")
@@ -52,23 +55,19 @@ def main() -> int:
     errores: list = []
     avisos: list = []
 
-    # C01 · el diario es legible y trae lo imprescindible
+    # C01 · el asiento de apertura exportado es legible y trae lo imprescindible
     try:
-        tabs = tablas(args.diario)
-    except RuntimeError as exc:
-        print("C01 ERROR: " + str(exc))
+        df = cargar_apertura(args.apertura)
+    except (OSError, ValueError, RuntimeError) as exc:
+        print("C01 ERROR: no se puede leer la apertura exportada: " + str(exc))
         return 2
-    if not hay_diario(args.diario):
-        print("C01 ERROR: el fichero no tiene tabla Diario. Tablas: " + str(tabs))
-        return 2
-
-    df = cargar_diario(args.diario)
     faltan = [c for c in COLUMNAS_MINIMAS if c not in df.columns]
     if faltan:
-        errores.append("C01 · al diario le faltan columnas obligatorias: " + str(faltan))
+        errores.append("C01 · a la apertura exportada le faltan columnas: " + str(faltan)
+                       + ". Exportala con la consulta que da consulta_apertura.py, tal cual.")
 
     # C02 · el filtro de apertura se lee y se entiende
-    filtro = leer_filtro_apertura(args.diario)
+    filtro = leer_filtro(args.filtro)
     if filtro.get("ausente"):
         errores.append(
             "C02 · no se puede identificar el asiento de apertura: "
@@ -86,8 +85,8 @@ def main() -> int:
     print("C02 · filtro de apertura: " + filtro["campo"] + " " + filtro["operador"]
           + " " + repr(filtro["valor"]))
 
-    # C03 · el filtro selecciona algo
-    mascara = aplicar_filtro(df, filtro)
+    # C03 · el filtro selecciona algo (lo evaluo JET al exportar: POR_FILTRO)
+    mascara = df["POR_FILTRO"]
     n = int(mascara.sum())
     if n == 0:
         print("C03 ERROR: el filtro de apertura no selecciona ningun apunte.")
@@ -119,7 +118,9 @@ def main() -> int:
             "diferencia que cuantificar."
         )
 
-    # C06 · si el campo APERTURA viene relleno, tiene que decir lo mismo que el filtro
+    # C06 · si el campo APERTURA viene relleno, tiene que decir lo mismo que el filtro.
+    # La exportacion trae justo la union de los dos -lo que el filtro selecciona y lo que
+    # APERTURA marca-, que es todo lo que esta comprobacion necesita del diario.
     if "APERTURA" in df.columns and (df["APERTURA"] != 0).any():
         por_campo = set(df.index[df["APERTURA"] != 0])
         por_filtro = set(df.index[mascara])

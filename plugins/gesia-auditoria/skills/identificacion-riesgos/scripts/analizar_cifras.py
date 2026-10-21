@@ -21,10 +21,14 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
-from lib_riesgos import (
+# con `python -I` la carpeta del script no entra en sys.path y lib_riesgos no se encuentra
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib_riesgos import (           # noqa: E402
     CONCENTRACION,
     EJERCICIOS,
     EJERCICIOS_PERDIDAS,
@@ -36,6 +40,7 @@ from lib_riesgos import (
     con_resumen,
     ruta_resumen,
     salida_utf8,
+    sin_tildes,
     comparar,
     convertir_signo,
     viene_convertido,
@@ -497,6 +502,145 @@ def resultado_por_ejercicio(pyg: list, ejercicios: list) -> dict:
             "nota": "no se ha localizado la fila de resultado del ejercicio"}
 
 
+# ── Cifras para la narrativa ──────────────────────────────────────────────────
+#
+# Para redactar la narrativa (paso 7 bis) el modelo abria los JSON de cifras, que
+# el SKILL.md dice que no se abren, y se equivocaba al leerlos: los importes llegan
+# como texto con coma decimal y un float() a pelo revienta («could not convert
+# string to float»), y tomo un dato de un ratio que no era (registro del
+# 21/10/2026). La tabla sale de aqui, con numero() y el signo de Gesia ya
+# aplicados por serie_presentada(), y va al resumen.
+
+# Lineas principales de la cuenta de resultados, en el orden del modelo. Cada
+# entrada da a lo sumo una fila. Se reconocen por el principio del concepto, sin
+# tildes ni numeracion; en la tabla sale el concepto tal como viene. Van las dos
+# denominaciones, la del PGC y la de las entidades sin animo de lucro: solo
+# aparece la que el expediente tenga.
+LINEAS_PYG = (
+    "importe neto de la cifra de negocios",
+    "ingresos de la actividad propia",
+    "ventas y otros ingresos ordinarios de la actividad mercantil",
+    "aprovisionamientos",
+    "gastos de personal",
+    "otros gastos de explotacion",
+    "otros gastos de la actividad",
+    "amortizacion del inmovilizado",
+    "resultado de explotacion",
+    "excedente de la actividad",
+    "resultado financiero",
+    "excedente de las operaciones financieras",
+    "resultado antes de impuestos",
+    "excedente antes de impuestos",
+    "resultado del ejercicio",
+    "excedente del ejercicio",
+)
+# «Resultado del ejercicio procedente de operaciones continuadas/interrumpidas»
+# empieza igual que el resultado del ejercicio y no lo es (ver
+# resultado_por_ejercicio).
+EXCLUIR_PYG = ("procedente", "interrumpidas", "continuadas")
+NUMERACION = re.compile(r"^\s*(?:[a-z]{1,2}[.)]\s*)?(?:[0-9]+[.)]\s*)?")
+
+
+def _clave(f: dict) -> str:
+    return NUMERACION.sub("", sin_tildes(concepto(f))).strip()
+
+
+def _fila_narrativa(f: dict) -> dict:
+    s = serie_presentada(f)
+    crudo = serie(f)
+    sen = comparar(s[0], s[1], crudo[0] * crudo[1] < 0)
+    return {"epigrafe": etiqueta(f), "concepto": concepto(f),
+            "actual": round(s[0], 2), "anterior": round(s[1], 2),
+            "diferencia": round(s[0] - s[1], 2),
+            # variacion() da None con base despreciable, igual que en el analisis
+            "variacion": (None if variacion(s[0], s[1]) is None
+                          else sen["variacion_absoluta"]),
+            "sentido": sen["sentido"]}
+
+
+def cifras_narrativa(balance: list, pyg: list, ir_t: float) -> dict:
+    """Balance: secciones y epigrafes (niveles 1 y 2) con saldo del ejercicio por
+    encima de la IR_T; el resultado, si esta a ese nivel, siempre (como en
+    analizar()). Cuenta de resultados: las lineas
+    de LINEAS_PYG que haya. Sin IR_T, todo el balance de niveles 1 y 2."""
+    bal = []
+    for f in balance:
+        if not (1 <= nivel(f) <= 2) or not concepto(f):
+            continue
+        s = serie_presentada(f)
+        if abs(s[0]) < 0.005 and abs(s[1]) < 0.005:
+            continue
+        if ir_t > 0 and abs(s[0]) < ir_t and not es_resultado(concepto(f)):
+            continue
+        bal.append(_fila_narrativa(f))
+
+    res = []
+    for prefijo in LINEAS_PYG:
+        candidatas = [f for f in pyg
+                      if 1 <= nivel(f) <= 2 and _clave(f).startswith(prefijo)
+                      and not any(x in _clave(f) for x in EXCLUIR_PYG)]
+        candidatas = [f for f in candidatas
+                      if abs(serie_presentada(f)[0]) >= 0.005
+                      or abs(serie_presentada(f)[1]) >= 0.005]
+        if candidatas:
+            # entre filas que repiten la linea, la mas agregada (como el resultado)
+            f = max(candidatas, key=lambda x: _rango({"epigrafe": etiqueta(x)}))
+            res.append(_fila_narrativa(f))
+    return {"balance": bal, "resultados": res}
+
+
+def _eur(v: float, signo: bool = False) -> str:
+    # Como el informe Word (generar_informe.euro): sin decimales, miles con espacio
+    t = format(abs(v), ",.0f").replace(",", " ")
+    if t == "0":
+        return t
+    if v < 0:
+        return "-" + t
+    return "+" + t if signo else t
+
+
+def _pct(fila: dict) -> str:
+    v = fila["variacion"]
+    if v is None:
+        texto = ("nueva" if abs(fila["anterior"]) < 0.005 else "s/base")
+    else:
+        texto = ("+" if v > 0 else "-" if v < 0 else "") + format(
+            abs(v) * 100, ".1f").replace(".", ",") + " %"
+    if fila["sentido"] == "cambia de signo":
+        texto += " (cambia de signo)"
+    return texto
+
+
+def tabla_narrativa(cifras: dict, ejercicios: list, como_se_llama: str,
+                    ir_t: float) -> str:
+    """El bloque markdown del resumen. Devuelve texto, no imprime."""
+    n = ejercicios[0] if ejercicios else "N"
+    n1 = ejercicios[1] if len(ejercicios) > 1 else "N-1"
+    cab = ("| Código | Concepto | " + n + " | " + n1 + " | Diferencia | Var. |\n"
+           "|---|---|--:|--:|--:|--:|\n")
+
+    def filas(lista):
+        return "".join("| " + x["epigrafe"] + " | " + x["concepto"].replace("|", "/") + " | "
+                       + _eur(x["actual"]) + " | " + _eur(x["anterior"]) + " | "
+                       + _eur(x["diferencia"], signo=True) + " | " + _pct(x) + " |\n"
+                       for x in lista) or "| — | sin filas | | | | |\n"
+
+    criterio = ("con saldo de " + n + " igual o superior a la IR_T ("
+                + _eur(ir_t) + ")" if ir_t > 0 else
+                "todos (sin IR_T no hay filtro de materialidad)")
+    return ("\n## Cifras para la narrativa (" + n + " frente a " + n1 + ")\n\n"
+            "Para redactar `narrativa.json` con estas cifras, sin abrir los JSON. "
+            "Euros sin decimales, con el signo con que los presenta Gesia: en el "
+            "balance activo y pasivo en positivo (un patrimonio neto negativo sale "
+            "negativo); en la " + como_se_llama + " las partidas en magnitud y los "
+            "resultados con signo, beneficio positivo y pérdida negativa. «nueva» y "
+            "«s/base»: sin base en " + n1 + " no se da porcentaje.\n\n"
+            "### Balance: secciones y epígrafes " + criterio + "\n\n"
+            + cab + filas(cifras["balance"])
+            + "\n### " + como_se_llama[:1].upper() + como_se_llama[1:]
+            + ": líneas principales\n\n" + cab + filas(cifras["resultados"]))
+
+
 def main() -> int:
     salida_utf8()
     resumen = con_resumen()
@@ -551,11 +695,18 @@ def main() -> int:
         return 2
 
     entidad = es_esal(conceptos)
+    # El rotulo dice de donde viene la clasificacion, y nada mas: el flag. Decia
+    # «descartado por el auditor» y en el registro del 21/10/2026 el --mercantil lo
+    # habia puesto el modelo deduciendolo de la forma juridica, sin preguntar: el
+    # papel atribuia al auditor una decision que no habia tomado.
     if args.sin_animo_de_lucro:
-        entidad = {"esal": True,
-                   "terminos": entidad["terminos"] + ["indicado por el auditor"]}
+        origen = "indicado con --sin-animo-de-lucro"
+        entidad = {"esal": True, "terminos": entidad["terminos"]}
     elif args.mercantil:
-        entidad = {"esal": False, "terminos": ["descartado por el auditor"]}
+        origen = "indicado con --mercantil"
+        entidad = {"esal": False, "terminos": []}
+    else:
+        origen = "deducido del vocabulario del balance"
 
     salida = {
         "ejercicios": ejercicios,
@@ -563,9 +714,8 @@ def main() -> int:
             "sin_animo_de_lucro": entidad["esal"],
             "terminos_detectados": entidad["terminos"],
             # De donde sale la clasificacion, para que el papel pueda decirlo
-            "origen": ("indicado por el auditor"
-                       if (args.sin_animo_de_lucro or args.mercantil)
-                       else "deducido del vocabulario del balance"),
+            "origen": origen,
+            "por_flag": bool(args.sin_animo_de_lucro or args.mercantil),
             # El informe tiene que hablar el idioma de la entidad.
             "denominacion_resultados": ("cuenta de resultados" if entidad["esal"]
                                         else "cuenta de pérdidas y ganancias"),
@@ -583,6 +733,8 @@ def main() -> int:
         "balance": analizar(balance, ejercicios, "balance", args.ir_t),
         "resultados": analizar(pyg, ejercicios, "resultados", args.ir_t),
         "resultado_ejercicio": resultado_por_ejercicio(pyg, ejercicios),
+        # La misma tabla que va al resumen, para poder contrastarla
+        "cifras_narrativa": cifras_narrativa(balance, pyg, args.ir_t),
         "umbrales": {
             "variacion": VARIACION,
             "concentracion": CONCENTRACION,
@@ -606,10 +758,10 @@ def main() -> int:
         return 1
 
     e = salida["entidad"]
+    entre = ([e["origen"]] if e["por_flag"] else []) + e["terminos_detectados"][:3]
     print("  entidad      " + ("sin ánimo de lucro" if e["sin_animo_de_lucro"]
                                else "sociedad mercantil")
-          + (" (" + ", ".join(e["terminos_detectados"][:3]) + ")"
-             if e["terminos_detectados"] else ""))
+          + (" (" + ", ".join(entre) + ")" if entre else ""))
     print("  se dice      " + e["denominacion_resultados"])
     for que in ("balance", "resultados"):
         a = salida[que]
@@ -658,8 +810,14 @@ def main() -> int:
         print("  con " + c["epigrafe"].ljust(10)
               + format(c["peso"] * 100, ".1f").rjust(8) + " %  "
               + format(c["importe"], ",.0f").rjust(14) + "  " + c["concepto"][:44])
+    cn = salida["cifras_narrativa"]
+    resumen.solo_fichero(tabla_narrativa(cn, ejercicios, e["denominacion_resultados"],
+                                         args.ir_t))
     resumen.guardar(ruta_resumen(args.salida))
     print("  resumen      " + ruta_resumen(args.salida))
+    print("               con las cifras para la narrativa: "
+          + str(len(cn["balance"])) + " filas de balance y "
+          + str(len(cn["resultados"])) + " de la " + e["denominacion_resultados"])
     return 0
 
 

@@ -2,7 +2,11 @@
 
     python generar_informe.py --analisis analisis.json --seleccion seleccion.json \
         --cliente "RAZON SOCIAL, S.A." --cierre 31/12/25 --generado 2026-08-24 \
+        --catalogo riesgos.json --avisos avisos.json --ref "<referencia>" \
         --salida "<expediente>/AsistenteIA/IdentificacionRiesgos/....docx"
+
+`--avisos` es el JSON de validar_seleccion.py --avisos-salida: sus avisos van a la
+Nota del informe, y si la validacion fallo o es de otra seleccion no hay informe.
 
 `--generado` es obligatorio: nada en este proyecto lee el reloj.
 
@@ -22,7 +26,10 @@ from docx import Document
 from docx.enum.text import WD_ALIGN_PARAGRAPH
 from docx.shared import Cm, Pt
 
-from lib_riesgos import (
+# con `python -I` la carpeta del script no entra en sys.path y las lib_* no se encuentran
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib_riesgos import (           # noqa: E402
     CONCENTRACION,
     EJERCICIOS_PERDIDAS,
     VARIACION,
@@ -32,8 +39,18 @@ from lib_riesgos import (
     riesgo_legible,
     salida_utf8,
 )
+from lib_uso_ia import MARCA_DOCX, apartado_uso_ia  # noqa: E402
 
 MAX_HECHOS = 12
+
+# Lo que el equipo deberia contrastar. Describe, no dictamina: el alcance es suyo.
+PROPUESTA = (
+    "Contrastar las variaciones, concentraciones y pérdidas señaladas con el balance y la cuenta "
+    "de resultados del expediente; comprobar que cada riesgo propuesto se sostiene en las cifras "
+    "que cita y que su descripción y procedimientos son los del catálogo de la firma; y valorar, "
+    "con el conocimiento de la entidad y su entorno, si falta algún riesgo que las cifras no "
+    "muestran. La valoración del riesgo es del auditor."
+)
 
 # Cuantos ratios de la revision analitica se listan en el informe.
 MAX_RA = 12
@@ -151,17 +168,24 @@ def main() -> int:
     p.add_argument("--cierre", default="")
     p.add_argument("--sector", default="")
     p.add_argument("--generado", required=True)
-    # La referencia se PREGUNTA al usuario. No hay valor por defecto: inventar
-    # una referencia de papel de trabajo es meter en el expediente un codigo
-    # que no existe en el indice de Gesia.
+    # La referencia sale de la tabla Referencias de ESTE expediente, nunca de memoria
+    # ni de otro: registro del 21/10/2026, un codigo propuesto de memoria era en ese
+    # expediente el de otro papel y el informe se archivo bajo el. No hay valor por
+    # defecto; vacia si el usuario no tiene referencia, y la celda queda en blanco.
     p.add_argument("--ref", required=True,
-                   help="referencia del papel, la que diga el usuario")
+                   help="referencia del papel, comprobada en Referencias del expediente; "
+                        "cadena vacía si el usuario no la tiene")
     # Sin --fuente se compone con lo que REALMENTE se ha usado, y con la
     # denominacion que corresponda a la entidad: en una sin animo de lucro no se
     # puede escribir "PyG".
     p.add_argument("--fuente", default=None,
                    help="texto de la línea Fuente; si se omite, se compone solo")
     p.add_argument("--catalogo")
+    # Los avisos de validar_seleccion.py «tienen que constar en el informe», y hasta
+    # el 20/10/2026 no constaban: se imprimian en pantalla y ahi se quedaban. Es
+    # obligatorio para que no dependa de que alguien se acuerde de copiarlos.
+    p.add_argument("--avisos", required=True,
+                   help="el JSON de validar_seleccion.py --avisos-salida")
     p.add_argument("--salida", required=True)
     args = p.parse_args()
 
@@ -174,6 +198,21 @@ def main() -> int:
     elegidos = seleccion.get("riesgos") if isinstance(seleccion, dict) else seleccion
     catalogo = cargar_catalogo(args.catalogo)
     por_id = catalogo["por_id"]
+
+    # La validacion tiene que ser de ESTA seleccion: si se corrigio despues de validar,
+    # los avisos que se llevarian al informe serian los de otra.
+    validacion = json.loads(Path(args.avisos).read_text(encoding="utf-8"))
+    if not validacion.get("valida"):
+        print("ERROR: la selección no pasó la validación (" + args.avisos + "). "
+              "No se genera el informe.")
+        return 2
+    ids_seleccion = sorted({int(r["id"]) for r in elegidos})
+    if sorted(validacion.get("ids") or []) != ids_seleccion:
+        print("ERROR: " + args.avisos + " es la validación de otra selección ("
+              + str(validacion.get("ids")) + " frente a " + str(ids_seleccion) + "). "
+              "Vuelve a pasar validar_seleccion.py sobre la selección actual.")
+        return 2
+    avisos = [str(a) for a in validacion.get("avisos") or []]
 
     # Por nombre, contra este catalogo: el numero de los dos obligatorios es la
     # numeracion interna de cada master. Si no se resuelven, no hay informe: uno
@@ -218,7 +257,8 @@ def main() -> int:
     # Realizado y Verificado van en blanco: los rellena el auditor.
     tabla(doc, ["", ""], [["REF. P.T.", args.ref],
                           ["Realizado", ""],
-                          ["Verificado", ""]])
+                          ["Verificado", ""],
+                          ["Uso de IA", MARCA_DOCX]])
 
     parrafo(doc, "NIA-ES 315 · Identificación y valoración de los riesgos de "
                  "incorrección material", cursiva=True, tam=9)
@@ -245,10 +285,16 @@ def main() -> int:
     ])
 
     if entidad.get("sin_animo_de_lucro"):
-        parrafo(doc, "La entidad se ha tratado como entidad sin ánimo de lucro por "
-                     "el vocabulario de sus cuentas anuales (" +
-                     ", ".join(entidad.get("terminos_detectados", [])[:4]) +
-                     "). En este informe se habla de «" + como_se_llama + "».",
+        # Por flag o por vocabulario, y se dice cual: con el flag puede no haber
+        # termino ninguno, y el parentesis salia vacio (registro del 21/10/2026).
+        terminos = ", ".join(entidad.get("terminos_detectados", [])[:4])
+        if str(entidad.get("origen", "")).startswith("indicado"):
+            por = "por indicación expresa al analizar las cifras"
+        else:
+            por = ("por el vocabulario de sus cuentas anuales"
+                   + (" (" + terminos + ")" if terminos else ""))
+        parrafo(doc, "La entidad se ha tratado como entidad sin ánimo de lucro " + por
+                     + ". En este informe se habla de «" + como_se_llama + "».",
                 cursiva=True, tam=9)
 
     # ── Cómo se ha hecho ──────────────────────────────────────────────────────
@@ -435,14 +481,67 @@ def main() -> int:
 
     doc.add_heading("Nota", level=1)
     parrafo(doc, DECLARACION, cursiva=True, tam=9)
+    if avisos:
+        parrafo(doc, "Avisos de la validación de la selección contra el catálogo, que "
+                     "limitan lo que este informe puede sostener:", negrita=True, tam=9)
+        for a in avisos:
+            parrafo(doc, "• " + a[:1].upper() + a[1:] + ("" if a.endswith(".") else "."),
+                    tam=9)
+
+    # ── Evidencia del uso de IA (lib_uso_ia, docs/evidencia-uso-ia.md) ────────
+    ejercicios = [str(e) for e in analisis.get("ejercicios", [])]
+    areas = sorted({por_id[int(r["id"])]["area"] for r in elegidos if int(r["id"]) in por_id})
+    # las comprobaciones se calculan aqui, sobre lo que lleva el informe: el papel no afirma lo
+    # que otro script dijo, afirma lo que este ha visto
+    ids_elegidos = {int(r["id"]) for r in elegidos}
+    fuera = sorted(ids_elegidos - set(por_id))
+    faltan = [i for i in ids_obligatorios if i not in ids_elegidos]
+    apartado_uso_ia(
+        doc,
+        papel=(args.cliente or "") + " · Auditoría a " + (args.cierre or "—") + " · "
+              + (args.ref + " " if args.ref else "") + "Identificación de riesgos de auditoría",
+        procedimiento="identificacion-riesgos",
+        descripcion=("Identificación de los riesgos de incorrección material (NIA-ES 315) a partir "
+                     "del balance, la " + como_se_llama + " y la revisión analítica plurianuales del "
+                     "expediente, eligiéndolos del catálogo de riesgos del máster de la firma."),
+        alcance=("Ejercicios " + (", ".join(ejercicios) or "del expediente") + ". Importancia relativa "
+                 + ("de trabajo " + texto_ir if mat.get("aplicada") else "sin aplicar")
+                 + ". Sector: " + (args.sector or "no indicado") + "."),
+        resultado=("Este documento: " + str(len(elegidos)) + " riesgos propuestos"
+                   + (" (áreas " + ", ".join(a for a in areas if a) + ")" if areas else "")
+                   + ". La selección de los riesgos y los textos de análisis"
+                   + (" —balance, resultados, revisión analítica y resumen—" if narrativa else "")
+                   + " los ha redactado la herramienta; la descripción y los procedimientos de cada "
+                     "riesgo son los del catálogo."),
+        comprobaciones=[
+            ("Cada riesgo propuesto existe en el catálogo del máster (" + str(catalogo.get("version", ""))
+             + "): ninguno inventado.") if not fuera else
+            ("ATENCIÓN: " + str(len(fuera)) + " riesgos de la selección no están en el catálogo y no "
+             "figuran en este informe (" + ", ".join(str(i) for i in fuera) + ")."),
+            ("Los " + str(len(ids_obligatorios)) + " riesgos obligatorios del catálogo están en la "
+             "selección.") if not faltan else
+            ("ATENCIÓN: faltan riesgos obligatorios del catálogo (" + ", ".join(str(i) for i in faltan)
+             + ")."),
+            "Umbrales aplicados a las cifras: variación del " + str(int(VARIACION * 100))
+            + " %, concentración del " + str(int(CONCENTRACION * 100)) + " % y pérdidas en "
+            + str(EJERCICIOS_PERDIDAS) + " o más ejercicios.",
+            ("La validación de la selección no dejó avisos.") if not avisos else
+            ("La validación de la selección dejó " + str(len(avisos)) + " aviso(s), "
+             "recogidos en la Nota."),
+        ],
+        propuesta=PROPUESTA,
+        generado=args.generado,
+    )
 
     salida = Path(args.salida)
     salida.parent.mkdir(parents=True, exist_ok=True)
     try:
         doc.save(salida)
     except PermissionError:
+        # o el entorno no deja escribir en esa carpeta (ChatGPT, registro del 21/10/2026)
         print("ERROR: no se puede escribir " + str(salida))
-        print("       El fichero está abierto en Word. Ciérralo y repite.")
+        print("       O está abierto en Word (ciérralo y repite), o el entorno no tiene permiso")
+        print("       para escribir en esa carpeta (pide el permiso y repite).")
         return 2
 
     print("Escrito: " + str(salida))

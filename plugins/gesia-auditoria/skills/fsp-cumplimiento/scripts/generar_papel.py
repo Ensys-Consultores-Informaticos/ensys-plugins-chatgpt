@@ -6,7 +6,10 @@
         --salida "<expediente>/AsistenteIA/FspCumplimiento/Cumplimiento <PRUEBA> <CLIENTE> <EJERCICIO>.xlsx" \
         --generado 2026-09-02
 
-Una sola hoja, «Analisis muestra», en cuatro zonas de color con su banda de
+El libro empieza por la hoja «Uso de IA» (lib_uso_ia: la evidencia del uso de
+inteligencia artificial, con lo del equipo en blanco) y sigue con el papel.
+
+La hoja del papel, «Analisis muestra», va en cuatro zonas de color con su banda de
 titulo: A los datos de la muestra, B el documento localizado y lo leido en el
 (numero, fecha, CIF, tercero, concepto, base, IVA, retencion, total), C una
 columna por atributo EN BLANCO y la observacion propuesta para ForSampling, y D
@@ -39,10 +42,12 @@ from openpyxl.utils import get_column_letter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib_fsp import (  # noqa: E402
+    PREFIJO_DUDOSA,
     ROL_AUDITOR,
     TOL_IMPORTE,
     TOL_IVA,
     VENTANA_DIAS,
+    _cuadra_calculo,
     cargar_evaluacion,
     cargar_facturas,
     cargar_json,
@@ -55,11 +60,33 @@ from lib_fsp import (  # noqa: E402
     parse_fecha,
     parse_importe,
     proponer_roles,
+    es_alias,
+    nombres_locales,
+    rehidratar_local,
     rutas_documentos,
     salida_utf8,
 )
+from lib_uso_ia import hoja_uso_ia, marcar_papel  # noqa: E402
 
 FONT = "Arial"
+
+# Lo que el equipo deberia contrastar. Describe, no dictamina: el alcance es suyo.
+PROPUESTA = (
+    "Revisar contra el documento los elementos cuya observación señala algo (en amarillo) y una "
+    "selección de los propuestos como «Ok»; confirmar los documentos asignados a mano, con más de "
+    "un candidato o con asignación dudosa; y resolver los atributos marcados «auditor», que no se "
+    "infieren del documento."
+)
+
+
+def _es_hallazgo(v: str) -> bool:
+    """Una celda que señala algo y NO es una asignacion dudosa: esas se cuentan aparte, porque no
+    afirman nada del elemento hasta que se confirme el documento."""
+    return v != "auditor" and not v.startswith("Ok") and not v.startswith(PREFIJO_DUDOSA)
+
+
+def _dudosa(e: dict) -> bool:
+    return bool(e["factura"]) and bool((e["criterios"] or {}).get("dudosa"))
 FORMATO_EURO = '#,##0.00 "€";-#,##0.00 "€";"-"'
 FORMATO_FECHA = "DD/MM/YYYY"
 AMARILLO = PatternFill("solid", fgColor="FFFF00")
@@ -202,8 +229,11 @@ def _hoja_muestra(wb: Workbook, evaluados: list[dict], cols: dict, atributos: li
     ws["A3"] = ("Propuesta del asistente: localiza cada documento y comprueba lo que se puede comprobar desde él. "
                 "Las columnas de atributos se dejan en blanco para el auditor, que es quien concluye y firma.")
     ws["A3"].font = Font(name=FONT, italic=True, size=9, color="595959")
+    dudosas = [e for e in evaluados if _dudosa(e)]
     ws["A4"] = ("Amarillo: la observación señala algo. Este papel no prueba que el documento sea auténtico, ni que "
-                "el gasto estuviera autorizado, ni que el registro fuera oportuno: nada de eso está en la factura.")
+                "el gasto estuviera autorizado, ni que el registro fuera oportuno: nada de eso está en la factura."
+                + (f" Asignaciones dudosas, contadas aparte: {len(dudosas)} ({_ids(dudosas, cols)}). El documento "
+                   "puede ser otro del mismo tercero y no se afirma diferencia hasta confirmarlo." if dudosas else ""))
     ws["A4"].font = Font(name=FONT, italic=True, size=9, color="595959")
 
     _bandas(ws, 6, [(ZONAS_DEF["muestra"][0], ZONAS_DEF["muestra"][1], 1, n_pob),
@@ -246,11 +276,14 @@ def _hoja_muestra(wb: Workbook, evaluados: list[dict], cols: dict, atributos: li
             casa = ", ".join(x for x, b in (("número", c["numero"]), ("tercero", c.get("tercero")),
                                             (f"importe ({c['importe']})", c["importe"]),
                                             ("fecha", c["fecha"])) if b)
+            if c.get("dudosa"):
+                casa += " · ASIGNACIÓN DUDOSA"
             if fecha_libros and fecha_doc and col_fecha_pob:
                 dias = f'=IFERROR({L(col_fecha_pob)}{fila}-{L(c_fecha_doc)}{fila},"")'
             else:
                 dias = c["dias"]   # sin dos fechas de verdad no hay resta que hacer
-            valores += [casa, c["diferencia"], dias]
+            # con asignacion dudosa no se escribe diferencia: no se afirma hasta confirmar el documento
+            valores += [casa, None if c.get("dudosa") else c["diferencia"], dias]
         else:
             valores += ["", None, None]
 
@@ -329,6 +362,13 @@ def main() -> int:
 
     wb = Workbook()
     _hoja_muestra(wb, evaluados, cols, atributos, roles, params, args.generado, rutas)
+    # la marca va en la fila 5, libre entre la cabecera y las bandas: este papel no tiene bloque
+    # de Realizado / Verificado, y es lo primero que se ve al abrir la hoja
+    marcar_papel(wb["Análisis muestra"], "A5", "B5")
+    _uso_ia(wb, args, evaluados, cruce, cols, atributos, roles, params, facturas)
+    # con un manifiesto local (--carpeta, sin MCP) el papel recupera aqui el nombre real de cada
+    # alias; lo impreso al chat sigue por alias (registro del 21/10/2026)
+    rehidratar_local(wb, nombres_locales(_manifiesto_imagenes(args)))
 
     salida = Path(args.salida)
     salida.parent.mkdir(parents=True, exist_ok=True)
@@ -339,20 +379,36 @@ def main() -> int:
         return 2
 
     con_doc = sum(1 for e in evaluados if e["factura"])
-    hall = sum(1 for e in evaluados for v in e["resultados"].values() if v != "auditor" and not v.startswith("Ok"))
+    hall = sum(1 for e in evaluados for v in e["resultados"].values() if _es_hallazgo(v))
+    dudosas = [e for e in evaluados if _dudosa(e)]
     print(f"Papel escrito: {salida}")
     if rutas:
         enlazados = [e for e in evaluados if e["factura"] and rutas.get(e["factura"].get("fichero"))]
         rotos = [e for e in enlazados if not Path(rutas[e["factura"]["fichero"]]).exists()]
         print(f"  documentos enlazados {len(enlazados)} de {con_doc}")
-        if rotos:
+        # Con --carpeta-documentos la ruta la ha dado el auditor, y desde el contenedor nunca se
+        # ve: el aviso solo hacia ruido (registro del 21/10/2026). Y un vinculo por alias
+        # (<carpeta>\<alias>, MCP 1.26.0) no existe en ningun disco hasta que `rehidratar` lo
+        # cambia por el nombre real: tampoco es un vinculo roto.
+        por_alias = [e for e in enlazados
+                     if es_alias(str(rutas[e["factura"]["fichero"]]).replace("\\", "/").rsplit("/", 1)[-1])]
+        rotos = [e for e in rotos if e not in por_alias]
+        if por_alias:
+            print(f"  {len(por_alias)} vínculo(s) van por el alias del documento: los deja buenos "
+                  f"«rehidratar» en el equipo del auditor, que cambia el alias por el fichero real")
+        if rotos and not args.carpeta_documentos:
             print(f"  AVISO: {len(rotos)} vínculo(s) apuntan a rutas que este proceso no ve. Si los "
                   f"scripts corren en un contenedor es lo normal y en la máquina del auditor "
                   f"funcionarán; si no, pásale --carpeta-documentos con la ruta buena y repite")
     else:
         print("  sin hipervínculos: no se ha indicado --manifiesto ni --carpeta-documentos")
     print(f"  elementos {len(evaluados)} · con documento {con_doc} · sin documento {len(evaluados) - con_doc}"
-          f" · documentos sin elemento {len(cruce['facturas_sin_fila'])} · celdas con hallazgo {hall}")
+          f" · documentos sin elemento {len(cruce['facturas_sin_fila'])} · celdas con hallazgo {hall}"
+          f" · asignaciones dudosas {len(dudosas)}")
+    for e in dudosas:
+        ident = e["fila"].get(cols.get("id"), "?")
+        texto = next((v for v in e["resultados"].values() if v.startswith(PREFIJO_DUDOSA + ":")), "")
+        print(f"  · ASIGNACIÓN DUDOSA, elemento {ident}: {texto[len(PREFIJO_DUDOSA) + 2:]}")
     for par in cruce.get("candidatos_sueltos") or []:
         print(f"  · POSIBLE DIFERENCIA, no extravío: el elemento {par['id']} quedó sin documento y "
               f"{par['fichero']} sin elemento"
@@ -367,15 +423,237 @@ def main() -> int:
         print(f"  · documento que no es de ningún elemento de la muestra: {fac.get('fichero')}"
               f" ({fac.get('proveedor') or '—'}, {fac.get('total') or '—'})")
     for e in evaluados:
-        if any(v != "auditor" and not v.startswith("Ok") for v in e["resultados"].values()):
+        if any(_es_hallazgo(v) for v in e["resultados"].values()):
             ident = e["fila"].get(cols.get("id"), "?")
             print(f"  · elemento {ident}: " + " | ".join(f"A{k}: {v}" for k, v in e["resultados"].items()
-                                                         if v != "auditor" and not v.startswith("Ok")))
+                                                         if _es_hallazgo(v)))
     if comp:
         r = comp["recuento"]
         print(f"  frente al auditor: coinciden {r['coinciden']} · skill señala/auditor Sí {r['skill_senala_auditor_si']}"
               f" · skill Ok/auditor No {r['skill_ok_auditor_no']} · al auditor {r['auditor']}")
+    print("  hoja «Uso de IA» con huecos de la aplicacion: sellar_uso_ia sobre el papel archivado")
     return 0
+
+
+def _ids(items: list[dict], cols: dict, maximo: int = 12) -> str:
+    """«elemento 4» o «elementos 3, 6», acotado: el texto va a una celda."""
+    ids = [str(e["fila"].get(cols.get("id"), "?")) for e in items]
+    return (("elemento " if len(ids) == 1 else "elementos ") + ", ".join(ids[:maximo])
+            + (f" y {len(ids) - maximo} más" if len(ids) > maximo else ""))
+
+
+def _manifiesto_imagenes(args) -> dict | None:
+    """El manifiesto de las imagenes, donde lo buscan los demas scripts: el indicado, o junto a
+    facturas.json, o en su subcarpeta facturas/ (la de preparar_facturas, subida entera)."""
+    candidatos = []
+    if args.manifiesto:
+        pm = Path(args.manifiesto)
+        candidatos += [pm, pm.parent / "facturas" / "manifiesto.json"]
+    base = Path(args.facturas).parent
+    candidatos += [base / "manifiesto.json", base / "facturas" / "manifiesto.json"]
+    for c in candidatos:
+        try:
+            if c.exists():
+                man = cargar_json(str(c))
+                if isinstance(man, dict):
+                    return man
+        except Exception:
+            continue
+    return None
+
+
+def _comprobaciones(evaluados: list[dict], cruce: dict, cols: dict) -> list[str]:
+    """Lo que ha comprobado el script, calculado sobre lo que lleva el papel. Cada frase es
+    verdad o lo dice con ATENCIÓN: va en el resultado, nunca como verificación del equipo."""
+    n = len(evaluados)
+    loc = [e for e in evaluados if e["factura"]]
+    sin = [e for e in evaluados if not e["factura"]]
+    out = []
+
+    # 1. el documento de cada elemento
+    vias = {"número e importe": 0, "importe": 0, "número": 0, "el importe del asiento completo": 0,
+            "tercero y fecha": 0}
+    for e in loc:
+        c = e["criterios"]
+        if c["numero"] and c["importe"]:
+            vias["número e importe"] += 1
+        elif c["importe"]:
+            vias["importe"] += 1
+        elif c["numero"]:
+            vias["número"] += 1
+        elif c.get("por_asiento"):
+            vias["el importe del asiento completo"] += 1
+        else:
+            vias["tercero y fecha"] += 1
+    a_mano = [e for e in loc if e["criterios"].get("declarado")]
+    ambiguos = [e for e in loc if e["criterios"].get("ambiguo")]
+    ficheros = [e["factura"].get("fichero") for e in loc]
+    repetidos = len(ficheros) - len(set(ficheros))
+    t = f"Documento localizado para {len(loc)} de {n} elementos"
+    if loc:
+        t += " (por " + ", por ".join(f"{k} {v}" for k, v in vias.items() if v) + ")"
+    t += "."
+    if a_mano:
+        t += f" {len(a_mano)} asignado(s) a mano en la transcripción ({_ids(a_mano, cols)})."
+    t += (" Ningún documento está asignado a dos elementos." if not repetidos else
+          f" ATENCIÓN: {repetidos} documento(s) asignados a más de un elemento.")
+    if sin:
+        t += f" ATENCIÓN: {len(sin)} elemento(s) sin documento ({_ids(sin, cols)})."
+    if ambiguos:
+        t += (f" ATENCIÓN: {len(ambiguos)} localizado(s) solo por tercero y fecha con más de un "
+              f"candidato ({_ids(ambiguos, cols)}).")
+    dudosas = [e for e in loc if _dudosa(e)]
+    if dudosas:
+        t += (f" ATENCIÓN: {len(dudosas)} asignación(es) dudosa(s), contadas aparte ({_ids(dudosas, cols)}): "
+              "solo las sostienen el tercero y la fecha, sin número que las ate, y el importe se aparta "
+              "más de la mitad o la fecha está más lejos que la de los documentos atados por importe o "
+              "número; el documento puede ser otro y no se afirma diferencia.")
+    sobran = cruce.get("facturas_sin_fila") or []
+    if sobran:
+        t += f" {len(sobran)} documento(s) transcrito(s) no corresponden a ningún elemento."
+    out.append(t)
+    if not loc:
+        return out
+
+    # 2. la aritmetica del documento, sobre las cifras de la zona B
+    cuadra, no_cuadra, ilegibles, tipo = [], [], [], []
+    for e in loc:
+        r = _cuadra_calculo(e["factura"])
+        if r.startswith("Ok"):
+            cuadra.append(e)
+        elif r.startswith("Sin base o total"):
+            ilegibles.append(e)
+        else:
+            no_cuadra.append(e)
+        if "no es el" in r and "% de la base" in r:
+            tipo.append(e)
+    t = (f"Aritmética del documento (base + IVA = total, o la regla de la retención de IRPF o de la "
+         f"exención) comprobada en {len(loc) - len(ilegibles)} de {len(loc)} documentos localizados: "
+         f"cuadra en {len(cuadra)}.")
+    if no_cuadra:
+        t += f" ATENCIÓN: no cuadra en {len(no_cuadra)} ({_ids(no_cuadra, cols)})."
+    if ilegibles:
+        t += (f" ATENCIÓN: {len(ilegibles)} sin base o total legibles, sin comprobar "
+              f"({_ids(ilegibles, cols)}).")
+    if tipo:
+        t += (f" ATENCIÓN: en {len(tipo)} la cuota de IVA no es el tipo que declara el documento "
+              f"({_ids(tipo, cols)}).")
+    out.append(t)
+
+    # 3. importe del documento frente a libros
+    claves = {"total": "por el total", "base": "por la base", "neto": "por el neto tras la retención",
+              "aplicable": "por el importe declarado a mano"}
+    por = {}
+    casan, no_casan, sin_afirmar = [], [], []
+    for e in loc:
+        c = e["criterios"]
+        k = c["importe"] or ("asiento" if c.get("por_asiento") else None)
+        if k:
+            casan.append(e)
+            etiqueta = claves.get(k, "por la suma del asiento partido")
+            por[etiqueta] = por.get(etiqueta, 0) + 1
+        elif c.get("dudosa"):
+            sin_afirmar.append(e)
+        else:
+            no_casan.append(e)
+    t = (f"Importe del documento frente al de libros: casa en {len(casan)} de {len(loc)}"
+         + (" (" + ", ".join(f"{k} {v}" for k, v in por.items()) + ")" if por else "") + ".")
+    if no_casan:
+        t += f" ATENCIÓN: no casa en {len(no_casan)} ({_ids(no_casan, cols)})."
+    if sin_afirmar:
+        t += (f" ATENCIÓN: en {len(sin_afirmar)} con asignación dudosa ({_ids(sin_afirmar, cols)}) no se "
+              "compara: no se sabe si el documento es el del elemento.")
+    out.append(t)
+
+    # 4. fecha del documento frente a la de libros
+    dentro = [e for e in loc if e["criterios"]["dias"] is not None
+              and abs(e["criterios"]["dias"]) <= VENTANA_DIAS]
+    fuera = [e for e in loc if e["criterios"]["dias"] is not None
+             and abs(e["criterios"]["dias"]) > VENTANA_DIAS]
+    sin_fecha = [e for e in loc if e["criterios"]["dias"] is None]
+    t = (f"Fecha del documento frente a la de libros: dentro de ±{VENTANA_DIAS} días en "
+         f"{len(dentro)} de {len(loc)}.")
+    if fuera:
+        t += f" ATENCIÓN: fuera de ese margen en {len(fuera)} ({_ids(fuera, cols)})."
+    if sin_fecha:
+        t += (f" ATENCIÓN: {len(sin_fecha)} sin dos fechas legibles que contrastar "
+              f"({_ids(sin_fecha, cols)}).")
+    out.append(t)
+    return out
+
+
+def _uso_ia(wb: Workbook, args, evaluados: list[dict], cruce: dict, cols: dict,
+            atributos: list[dict], roles: dict, params: dict, facturas: list[dict]) -> None:
+    """La hoja de evidencia del uso de IA, la primera del libro (lib_uso_ia)."""
+    def _dia(v):
+        d = parse_fecha(v)
+        return d.strftime("%d/%m/%Y") if d else (str(v) if v else "—")
+
+    prueba = params.get("Prueba") or "prueba de cumplimiento"
+    ejercicio = _dia(params.get("FechaInicioAuditoria")) + " — " + _dia(params.get("FechaFinAuditoria"))
+    nombres_rol = {"documento": "documento", "calculo": "cálculo",
+                   "contabilizacion": "contabilización", "auditor": "auditor"}
+    lista_roles = "; ".join(f"A{a.get('AtributoId')} {a.get('Nombre')}: "
+                            + nombres_rol.get(roles.get(str(a.get("AtributoId")), ROL_AUDITOR), "auditor")
+                            for a in atributos)
+    al_auditor = [f"A{a.get('AtributoId')}" for a in atributos
+                  if roles.get(str(a.get("AtributoId")), ROL_AUDITOR) == ROL_AUDITOR]
+    n = len(evaluados)
+    hall = [e for e in evaluados if any(_es_hallazgo(v) for v in e["resultados"].values())]
+    celdas = sum(1 for e in evaluados for v in e["resultados"].values() if _es_hallazgo(v))
+    dudosas = [e for e in evaluados if _dudosa(e)]
+
+    resultado = (
+        f"Este libro: hoja «Análisis muestra», {n} elementos, uno por fila. Redactado por la "
+        "herramienta: la transcripción de los documentos (zona B, leída de las imágenes), la evidencia "
+        "del cruce (zona D) y la columna «Observación propuesta», con un veredicto por atributo "
+        "(«Asistente IA: A1: … · A2: …»). Esos veredictos son PROPUESTAS de la herramienta, no "
+        "conclusiones: las columnas de los atributos quedan en blanco para el auditor"
+        + (f", y los atributos marcados «auditor» ({', '.join(al_auditor)}) no se infieren del "
+           "documento y quedan para él." if al_auditor else ".")
+        + f" La observación señala algo en {len(hall)} elementos ({celdas} celdas), en amarillo."
+        + (f" Aparte, {len(dudosas)} asignación(es) dudosa(s) ({_ids(dudosas, cols)}), también en amarillo: "
+           "la herramienta no sabe si el documento es el del elemento y no propone veredicto."
+           if dudosas else "")
+    )
+
+    adicional = [f"Las imágenes de los documentos de la muestra: la herramienta las lee (directamente "
+                 f"o con agentes lectores) para transcribir número, fecha, CIF, tercero, concepto e "
+                 f"importes. {len(facturas)} documentos transcritos."]
+    man = _manifiesto_imagenes(args)
+    if man and man.get("origen") == "mcp":
+        modo = str(man.get("modo") or "")
+        adicional.append("Las imágenes las preparó la aplicación en el equipo del auditor"
+                         + (" (" + ("tachadas" if modo.startswith("tach") else "sin tachar") + ")"
+                            if modo else "")
+                         + " y constan en la lista de arriba.")
+    elif man:
+        adicional.append("Las imágenes las renderizó en claro el script del procedimiento a partir de "
+                         "los PDF, sin pasar por la aplicación: no constan en la lista de arriba.")
+    else:
+        adicional.append("No consta el manifiesto de las imágenes: si los documentos no pasaron por la "
+                         "aplicación, no figuran en la lista de arriba.")
+
+    hoja_uso_ia(
+        wb,
+        papel=(f"Prueba de cumplimiento «{prueba}» · ref. {params.get('Referencia') or '—'} · "
+               f"ejercicio {ejercicio} · Análisis muestra"),
+        procedimiento="fsp-cumplimiento",
+        descripcion=("Validación de la muestra de una prueba de cumplimiento de ForSampling contra los "
+                     "documentos escaneados: localiza el documento de cada elemento, comprueba lo que "
+                     "el documento sostiene y propone un veredicto por atributo."),
+        alcance=(f"Prueba «{prueba}» (id {params.get('MuestraId')}, {params.get('Tipo')}, área "
+                 f"{params.get('Area')}, ref. {params.get('Referencia')}), ejercicio {ejercicio}: "
+                 f"{n} elementos de la muestra y {len(atributos)} atributos. Rol de cada atributo"
+                 + (" (fichero de roles de la ejecución): " if args.roles else
+                    " (propuesta automática por el nombre, sin fichero de roles): ")
+                 + lista_roles + "."),
+        resultado=resultado,
+        comprobaciones=_comprobaciones(evaluados, cruce, cols),
+        propuesta=PROPUESTA,
+        generado=args.generado,
+        informacion_adicional=adicional,
+    )
 
 
 if __name__ == "__main__":

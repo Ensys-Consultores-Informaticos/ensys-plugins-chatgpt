@@ -2,8 +2,12 @@
 """Propone importes para los ajustes del estado de flujos, desde el catalogo del expediente.
 
     python proponer_efe.py --catalogo catalogo.json --cuentas cuentas.json
-        --cuadro cuadro.json --cliente "..." --ejercicio 2025
+        --cuadro cuadro.json --cliente "..." --ejercicio 2025 --generado 19/10/2026
         --salida "<expediente>/AsistenteIA/EstadosFinancieros/Propuesta EFE <CLIENTE> <EJERCICIO>.xlsx"
+
+La primera hoja es «Uso de IA» (lib_uso_ia): la evidencia del uso de IA, que dice que los
+importes propuestos los ha calculado la herramienta, con lo del equipo en blanco. Nada lee el
+reloj: la fecha de generacion llega con --generado (regla 4).
 
 Gesia deja el importe de cada ajuste en blanco: la plantilla dice QUE lineas se mueven y en
 que sentido, y el auditor pone CUANTO. Este papel propone ese cuanto donde se puede sacar de
@@ -60,21 +64,44 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import date
+from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from lib_eeff import (
+# Los modulos de la carpeta se encuentran aunque se ejecute con `python -I`, que no pone la
+# carpeta del script en sys.path (prueba en Cowork, 20/10/2026).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib_eeff import (  # noqa: E402
+    BORRADOR,
+    INCOMPLETO,
     exigir_tokens,
     TOLERANCIA,
     a_float,
     es_si,
+    etiqueta,
+    frase_terceros,
+    frases_comprobacion,
     leer_json,
+    lineas_entrega,
     redondear,
     salida_utf8,
     texto,
+)
+from lib_uso_ia import hoja_uso_ia, marcar_papel  # noqa: E402
+
+# La fecha de generacion, la que pasa el modelo con --generado. Se fija en main().
+GENERADO = ""
+
+# Lo que el equipo podria contrastar. Describe, no dictamina: el alcance es suyo.
+PROPUESTA = (
+    "Contrastar cada importe propuesto con los movimientos de las cuentas de las que sale "
+    "(columna «De dónde sale» de la hoja Propuestas) y con la documentación del expediente. "
+    "Revisar que cada ajuste propuesto se sostiene en esos movimientos antes de teclearlo en "
+    "Gesia, y completar las plantillas sin propuesta según el criterio que trae cada una (hoja "
+    "Catalogo)."
 )
 
 FONT = "Calibri"
@@ -140,7 +167,20 @@ def _par(apunte: dict) -> tuple:
 # Cada una: los pares de linea y contrapartida que tiene que tener la plantilla para que la
 # regla le aplique -se reconoce por LA FORMA, no por el texto de la descripcion, que el
 # auditor puede cambiar-, y una funcion que reparte importes por par.
-# La funcion devuelve {par: (cobro, pago)} y una linea de texto diciendo de donde sale.
+# La funcion devuelve {par: (cobro, pago)} y una linea de texto diciendo de donde sale. Si no
+# da importe devuelve None y, en el texto, EL MOTIVO: hasta la tanda 3 devolvia None y una
+# cadena vacia, y proponer() descartaba la plantilla en silencio. En un expediente real
+# quedaron sin importe la distribucion del resultado y los gastos financieros, con regla
+# verificada, y la hoja Comprobaciones las conto entre las que no tienen regla (registro del
+# 21/10/2026).
+
+
+def _sin_saldo(s: Saldos, cuenta: str) -> str:
+    """Por que una cuenta no da importe. No estar en el plan no es lo mismo que estar a cero."""
+    if not s.existe(cuenta):
+        return f"la {cuenta} no está en el plan del expediente"
+    return f"la {cuenta} no tiene saldo en el ejercicio (0,00)"
+
 
 def _r_amortizacion(apuntes: list, s: Saldos):
     tramos = [("280", "680"), ("281", "681"), ("282", "682")]
@@ -153,21 +193,22 @@ def _r_amortizacion(apuntes: list, s: Saldos):
         imp[(acumulada, "C68")] = (0.0, v)
         fuentes.append(f"{dotacion} = {v:,.2f}")
     if not imp:
-        return None, ""
+        return None, ("ninguna dotación a la amortización da importe: "
+                      + "; ".join(_sin_saldo(s, d) for _, d in tramos))
     return imp, "dotación del ejercicio, cada tramo con su amortización acumulada: " + "; ".join(fuentes)
 
 
 def _r_gastos_financieros(apuntes: list, s: Saldos):
     v = s.importe("66")
     if not v:
-        return None, ""
+        return None, _sin_saldo(s, "66")
     return {("C66", "G66"): (v, 0.0), ("G66", "C66"): (0.0, v)}, f"saldo de la 66 del ejercicio = {v:,.2f}"
 
 
 def _r_ingresos_financieros(apuntes: list, s: Saldos):
     v = s.importe("76")
     if not v:
-        return None, ""
+        return None, _sin_saldo(s, "76")
     return {("C76", "C76"): (v, 0.0), ("G76", "C76"): (0.0, v)}, f"saldo de la 76 del ejercicio = {v:,.2f}"
 
 
@@ -181,10 +222,19 @@ def _distribucion(s: Saldos, beneficio: bool, contra129: str, destinos: tuple, r
     millones, que habria salido propuesto como reparto de beneficios.
     """
     apertura = s.apertura("129")
-    if apertura is None or abs(apertura) < TOLERANCIA:
-        return None, ""
+    if apertura is None:
+        return None, ("la 129 no está en el plan del expediente: sin su apertura no se sabe qué "
+                      "resultado se distribuye")
+    if abs(apertura) < TOLERANCIA:
+        return None, ("la apertura de la 129 es cero: no hay resultado del ejercicio anterior que "
+                      "distribuir")
     if beneficio != (apertura < 0):
-        return None, ""
+        if beneficio:
+            return None, (f"la apertura de la 129 es deudora ({apertura:,.2f}): el ejercicio "
+                          "anterior cerró con pérdida, y la distribución de pérdidas no se propone "
+                          "porque no está contrastada contra ningún expediente")
+        return None, (f"la apertura de la 129 es acreedora ({apertura:,.2f}): el ejercicio "
+                      "anterior cerró con beneficio, no con pérdida")
     total = abs(apertura)
     que = "beneficio" if beneficio else "pérdida"
     # con beneficio la 129 es el cobro y los destinos son pagos; con perdida, al reves.
@@ -255,15 +305,36 @@ def regla_de(plantilla: dict):
     return None, None
 
 
+def _orden_plantillas(grupos: dict) -> list:
+    return sorted(grupos.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit() else 0)
+
+
+def _pares(pares) -> str:
+    return ", ".join(f"{a} → {b}" for a, b in sorted(pares))
+
+
 def proponer(grupos: dict, s: Saldos) -> list:
     """[{numero, desc, regla, fuente, lineas: [(par, concepto, cobro, pago)], puesto}]"""
-    salida = []
-    for n, a in sorted(grupos.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit() else 0):
+    return evaluar(grupos, s)[0]
+
+
+def evaluar(grupos: dict, s: Saldos) -> tuple:
+    """(propuestas, no_aplicadas, reglas).
+
+    no_aplicadas es {numero: (regla, motivo)}: las plantillas que tienen regla verificada y no
+    llevan propuesta, con el motivo concreto. reglas es [(regla, aplicada, frase)], una por cada
+    una de las cuatro, con una frase que se entiende leida sola: a que plantilla se aplico, o
+    por que no. Las dos cosas faltaban, y una regla que no se aplica sin decirlo se confunde con
+    una plantilla sin regla (registro del 21/10/2026).
+    """
+    salida, no_aplicadas = [], {}
+    for n, a in _orden_plantillas(grupos):
         nombre, fn = regla_de(a)
         if not fn:
             continue
         imp, fuente = fn(a["apuntes"], s)
         if not imp:
+            no_aplicadas[n] = (nombre, fuente)
             continue
         lineas = []
         for p in a["apuntes"]:
@@ -273,7 +344,34 @@ def proponer(grupos: dict, s: Saldos) -> list:
         salida.append({"numero": n, "desc": a["desc"], "regla": nombre, "fuente": fuente,
                        "criterio": a["criterio"], "lineas": lineas,
                        "aprobado": a["aprobado"], "puesto": puesto})
-    return salida
+
+    reglas = []
+    for nombre, firma, _ in REGLAS:
+        hechas = [p for p in salida if p["regla"] == nombre]
+        sin = [(n, m) for n, (r, m) in no_aplicadas.items() if r == nombre]
+        partes = [f"aplicada a la nº {p['numero']} ({total_propuesto(p):,.2f} €)" for p in hechas]
+        partes += [f"NO aplicada a la nº {n}, porque {m}" for n, m in sin]
+        if partes:
+            reglas.append((nombre, bool(hechas), f"regla «{nombre}»: " + "; ".join(partes)))
+            continue
+        # NINGUNA plantilla tiene su forma. Si hay una parecida -comparte algun apunte con la
+        # firma y no tiene ya otra regla- se nombra con lo que le falta: es la que el auditor
+        # habra tocado o la que viene de otro master, y el motivo va tambien a su fila del
+        # Catalogo. La parecida NO se propone: la forma es lo que hace fiable la regla.
+        frase = (f"regla «{nombre}»: NO aplicada, porque ninguna plantilla del catálogo tiene su "
+                 f"forma (los apuntes {_pares(firma)})")
+        parecidas = [(len(firma & {_par(x) for x in a["apuntes"]}), n) for n, a in _orden_plantillas(grupos)
+                     if n not in no_aplicadas and not regla_de(a)[1]]
+        parecidas = [x for x in parecidas if x[0]]
+        if parecidas:
+            n = max(parecidas, key=lambda x: x[0])[1]
+            falta = firma - {_par(x) for x in grupos[n]["apuntes"]}
+            motivo = (f"no tiene la forma de la regla: le falta{'n' if len(falta) > 1 else ''} "
+                      f"{'los apuntes' if len(falta) > 1 else 'el apunte'} {_pares(falta)}")
+            no_aplicadas[n] = (nombre, motivo)
+            frase += f"; la más parecida es la nº {n}, que {motivo}"
+        reglas.append((nombre, False, frase))
+    return salida, no_aplicadas, reglas
 
 
 # ── el papel ──────────────────────────────────────────────────────────────────
@@ -292,9 +390,11 @@ def _titulo(ws, cliente: str, ejercicio: str, subtitulo: str) -> int:
     ws["A1"].font = Font(name=FONT, bold=True, size=13)
     ws["A2"] = subtitulo
     ws["A2"].font = Font(name=FONT, size=10, italic=True, color="595959")
-    ws["A3"] = ("Preparado por Asistente IA el " + date.today().strftime("%d/%m/%Y")
+    ws["A3"] = ("Preparado por Asistente IA" + (" el " + GENERADO if GENERADO else "")
                 + ". PROPUESTA: no está en Gesia, no está aprobada, y quien decide es el auditor.")
     ws["A3"].font = Font(name=FONT, size=9, color="808080")
+    # en todas las hojas, no solo en la primera: una hoja impresa suelta tambien la lleva
+    marcar_papel(ws, "A4", "B4")
     return 5
 
 
@@ -353,8 +453,9 @@ def _hoja_propuestas(wb: Workbook, props: list, cliente: str, ejercicio: str) ->
         fila += 2
     if not props:
         ws.cell(row=fila, column=1,
-                value="No hay ninguna plantilla del catálogo a la que aplique una regla "
-                      "verificada. Mira la hoja Catalogo: están todas, con su criterio.").font = NORMAL
+                value="Ninguna regla verificada ha dado importe a una plantilla del catálogo. "
+                      "Mira la hoja Catalogo: están todas, con su criterio, y en «Regla y motivo» "
+                      "por qué no se ha aplicado cada regla.").font = NORMAL
     return descuadres, ya_puestos
 
 
@@ -369,23 +470,42 @@ def total_propuesto(p: dict) -> float:
     return t
 
 
-def _hoja_catalogo(wb: Workbook, grupos: dict, propuesto: dict, cliente: str, ejercicio: str) -> None:
+SIN_REGLA = "sin regla verificada: la rellena el auditor con el criterio de la plantilla"
+
+
+def motivo_catalogo(n: str, plantilla: dict, propuesto: dict, no_aplicadas: dict) -> str:
+    """La columna «Regla y motivo» del Catalogo: con que regla se propone, o por que no.
+
+    Separa las tres cosas que la columna «¿Propuesta?» mezclaba con un «—» (registro del
+    21/10/2026): propuesta, con regla verificada y NO aplicada -con el motivo-, y sin regla."""
+    if n in propuesto:
+        return f"«{regla_de(plantilla)[0]}»: aplicada"
+    if n in no_aplicadas:
+        regla, motivo = no_aplicadas[n]
+        return f"«{regla}»: NO aplicada, porque {motivo}"
+    return SIN_REGLA
+
+
+def _hoja_catalogo(wb: Workbook, grupos: dict, propuesto: dict, cliente: str, ejercicio: str,
+                   no_aplicadas: dict | None = None) -> None:
+    no_aplicadas = no_aplicadas or {}
     ws = wb.create_sheet("Catalogo")
     fila = _titulo(ws, cliente, ejercicio,
                    "TODAS las plantillas de ajuste que tiene este expediente, con el criterio "
-                   "que trae cada una. Las que no llevan propuesta las rellena el auditor. "
+                   "que trae cada una. Las que no llevan propuesta las rellena el auditor, y "
+                   "«Regla y motivo» dice si tienen regla verificada y por qué no se aplicó. "
                    "Son DOS importes distintos: «ya aprobado en Gesia» es lo que está registrado "
                    "hoy en el expediente —0,00 mientras no se apruebe nada—, y «propuesto» es lo "
                    "que propone este papel, desglosado en la hoja Propuestas.")
     _cabecera(ws, fila,
               ["Nº", "Descripción", "Aprobado", "Apuntes", "Importe ya aprobado en Gesia",
-               "Importe propuesto", "¿Propuesta?", "Criterio de la plantilla"],
-              [6, 44, 11, 9, 20, 17, 13, 96])
+               "Importe propuesto", "¿Propuesta?", "Regla y motivo", "Criterio de la plantilla"],
+              [6, 44, 11, 9, 20, 17, 13, 60, 96])
     fila += 1
-    for n, a in sorted(grupos.items(), key=lambda kv: int(kv[0]) if kv[0].isdigit() else 0):
+    for n, a in _orden_plantillas(grupos):
         puesto = redondear(sum(a_float(p.get("Origen")) for p in a["apuntes"]))
         usada = a["aprobado"] or abs(puesto) > TOLERANCIA
-        fuente = NORMAL if usada or n in propuesto else APAGADO
+        fuente = NORMAL if usada or n in propuesto or n in no_aplicadas else APAGADO
         ws.cell(row=fila, column=1, value=n).font = fuente
         ws.cell(row=fila, column=2, value=a["desc"]).font = fuente
         ws.cell(row=fila, column=3, value="SÍ" if a["aprobado"] else "no").font = fuente
@@ -395,14 +515,22 @@ def _hoja_catalogo(wb: Workbook, grupos: dict, propuesto: dict, cliente: str, ej
         # lectura que hizo perder el tiempo al auditor el 26/09/2026.
         if n in propuesto:
             _importe(ws, fila, 6, propuesto[n], fuente)
-        ws.cell(row=fila, column=7, value="sí" if n in propuesto else "—").font = fuente
-        c = ws.cell(row=fila, column=8, value=a["criterio"])
+        ws.cell(row=fila, column=7,
+                value="sí" if n in propuesto else ("no" if n in no_aplicadas else "—")).font = fuente
+        m = ws.cell(row=fila, column=8, value=motivo_catalogo(n, a, propuesto, no_aplicadas))
+        m.font = fuente
+        m.alignment = Alignment(wrap_text=True, vertical="top")
+        c = ws.cell(row=fila, column=9, value=a["criterio"])
         c.font = fuente
         c.alignment = Alignment(wrap_text=True, vertical="top")
         if n in propuesto:
             ws.cell(row=fila, column=7).fill = TOTAL_FILL
+        elif n in no_aplicadas:
+            # tiene regla y no se aplico: es lo primero que el auditor tiene que mirar
+            for j in (7, 8):
+                ws.cell(row=fila, column=j).fill = AMARILLO
         elif not usada:
-            for j in range(1, 9):
+            for j in range(1, 10):
                 ws.cell(row=fila, column=j).fill = GRIS
         fila += 1
 
@@ -411,17 +539,21 @@ def _hoja_comprobaciones(wb: Workbook, comprobaciones: list, cliente: str, ejerc
     ws = wb.create_sheet("Comprobaciones")
     fila = _titulo(ws, cliente, ejercicio, "Los cuadres de la propuesta.")
     todo = all(ok is not False for _, ok, _ in comprobaciones)
+    borrador = any(ok in INCOMPLETO for _, ok, _ in comprobaciones)
+    # La propuesta es un borrador SIEMPRE: si sus cuadres salen bien, la cabecera lo dice en
+    # ambar, no en verde, y no lo llama descuadre, que es como se leyo el 20/10/2026.
     c = ws.cell(row=fila, column=1,
-                value="TODO CUADRA" if todo else "HAY DESCUADRES: no llevar esto a Gesia sin leerlos")
-    c.font = VERDE if todo else ROJO
+                value=("HAY DESCUADRES: no llevar esto a Gesia sin leerlos" if not todo else
+                       "LA PROPUESTA CUADRA, PERO ES UN BORRADOR: no es un estado de flujos "
+                       "terminado" if borrador else "TODO CUADRA"))
+    c.font = ROJO if not todo else (AMBAR if borrador else VERDE)
     fila += 2
     _cabecera(ws, fila, ["Comprobación", "Resultado", "Detalle"], [62, 18, 68])
     fila += 1
     for t, ok, detalle in comprobaciones:
         ws.cell(row=fila, column=1, value=t).font = NORMAL
-        etiqueta = "A TENER EN CUENTA" if ok is None else ("CUADRA" if ok else "NO CUADRA")
-        r = ws.cell(row=fila, column=2, value=etiqueta)
-        r.font = AMBAR if ok is None else (VERDE if ok else ROJO)
+        r = ws.cell(row=fila, column=2, value=etiqueta(ok))
+        r.font = VERDE if ok is True else (ROJO if ok is False else AMBAR)
         d = ws.cell(row=fila, column=3, value=detalle)
         d.font = NORMAL
         d.alignment = Alignment(wrap_text=True, vertical="top")
@@ -439,9 +571,13 @@ def main() -> int:
     p.add_argument("--cliente", required=True)
     p.add_argument("--ejercicio", default="")
     p.add_argument("--salida", required=True)
+    p.add_argument("--generado", required=True,
+                   help="fecha de generacion, dd/mm/aaaa: nada aqui lee el reloj")
     p.add_argument("--nombres-en-claro", action="store_true",
-                   help="solo si el auditor ha apagado la tokenizacion: configurar dice «forzado por el auditor»")
+                   help="solo si el auditor ha apagado la seudonimizacion: configurar dice «forzado por el auditor»")
     a = p.parse_args()
+    global GENERADO
+    GENERADO = a.generado
 
     catalogo = leer_json(a.catalogo)
     cuentas = leer_json(a.cuentas)
@@ -463,21 +599,23 @@ def main() -> int:
 
     grupos = agrupar(catalogo)
     s = Saldos(cuentas)
-    props = proponer(grupos, s)
+    props, no_aplicadas, reglas = evaluar(grupos, s)
     propuesto = {p["numero"]: total_propuesto(p) for p in props}
-    con_regla = set(propuesto)
 
     wb = Workbook()
     wb.remove(wb.active)
     descuadres, ya_puestos = _hoja_propuestas(wb, props, a.cliente, a.ejercicio)
-    _hoja_catalogo(wb, grupos, propuesto, a.cliente, a.ejercicio)
+    _hoja_catalogo(wb, grupos, propuesto, a.cliente, a.ejercicio, no_aplicadas)
 
+    # Cada detalle lleva su sujeto: en «PARA CONTAR AL ENTREGAR» sale sin el titulo, y
+    # «2 no coinciden» leido solo no dice que (registro del 21/10/2026).
     comprobaciones = []
     comprobaciones.append((
         "Cada propuesta cuadra: sus cobros suman lo mismo que sus pagos",
         not descuadres,
         f"cuadran las {len(props)} propuestas" if not descuadres
-        else f"{len(descuadres)} descuadran: "
+        else f"{len(descuadres)} propuestas de ajuste del estado de flujos descuadran, sus cobros "
+             "no suman lo mismo que sus pagos: "
              + "; ".join(f"nº {n} {d} ({v:,.2f} €)" for n, d, v in descuadres[:3])))
 
     distintas = [x for x in ya_puestos if abs(x[4]) > TOLERANCIA]
@@ -486,29 +624,52 @@ def main() -> int:
             "Donde el auditor ya puso el ajuste, la propuesta coincide con lo suyo",
             not distintas,
             f"coinciden las {len(ya_puestos)} que ya estaban puestas" if not distintas
-            else f"{len(distintas)} no coinciden: "
+            else f"{len(distintas)} propuestas no coinciden con el ajuste que el auditor ya "
+                 "aprobó en Gesia: "
                  + "; ".join(f"nº {n} {d}: Gesia {g:,.2f} y la propuesta {pr:,.2f}"
                              for n, d, g, pr, _ in distintas[:3])
                  + ". Manda lo del auditor; la diferencia hay que entenderla antes de tocar nada"))
+    # hasta aqui, los CUADRES de la propuesta: lo que el script comprueba. Lo que sigue son
+    # avisos sobre lo que es el papel, y en el bloque de uso de IA van en el resultado
+    cuadres = list(comprobaciones)
 
-    sin_regla = len(grupos) - len(con_regla)
+    # LAS REGLAS QUE NO SE APLICARON, aparte de las plantillas sin regla. Hasta la tanda 3
+    # iban juntas en «las N que no se proponen porque no hay contra que contrastar», y en
+    # un expediente real dos de ellas SI tenian regla verificada (registro del 21/10/2026).
+    fallidas = [frase for _, aplicada, frase in reglas if not aplicada]
     comprobaciones.append((
-        "Hay regla verificada para las plantillas que se proponen", None,
-        f"{len(con_regla)} de las {len(grupos)} del catálogo llevan propuesta. Las otras "
-        f"{sin_regla} salen en la hoja Catalogo con su criterio, para que las rellene el "
-        "auditor: no se proponen porque no hay contra qué contrastar la regla, y una regla sin "
-        "verificar que acierte por casualidad es peor que no tener regla"))
+        f"Las {len(REGLAS)} reglas verificadas se han aplicado", True if not fallidas else None,
+        f"las {len(REGLAS)} llevan propuesta: " + "; ".join(f for _, _, f in reglas)
+        if not fallidas else
+        f"{len(fallidas)} de las {len(REGLAS)} reglas verificadas de la propuesta de ajustes del "
+        "estado de flujos no se han aplicado: " + "; ".join(fallidas)
+        + ". Esas plantillas las rellena el auditor; el motivo está en la hoja Catalogo"))
+
+    sin_regla = len(grupos) - len(propuesto) - len(no_aplicadas)
+    comprobaciones.append((
+        "Todas las plantillas del catálogo tienen regla verificada", True if not sin_regla else None,
+        f"de las {len(grupos)} plantillas de ajuste del catálogo del estado de flujos, "
+        f"{len(propuesto)} llevan propuesta"
+        + ((f", {len(no_aplicadas)} tiene" if len(no_aplicadas) == 1 else f", {len(no_aplicadas)} tienen")
+           + " regla verificada y no se ha aplicado (el motivo está en la hoja Catalogo)" if no_aplicadas else "")
+        + (" y ninguna se queda sin regla" if not sin_regla else
+           (f" y {sin_regla} no tiene regla: sale en la hoja Catalogo con su criterio, para que la "
+            if sin_regla == 1 else
+            f" y {sin_regla} no tienen regla: salen en la hoja Catalogo con su criterio, para que las ")
+           + "rellene el auditor. No se proponen porque no hay contra qué contrastar una regla, y "
+           "una regla sin verificar que acierte por casualidad es peor que no tener regla")))
 
     # LA QUE MAS IMPORTA cuando el expediente no tiene el estado hecho, que es justo cuando
     # esta propuesta se lanza sola. Medido contra el unico expediente terminado: de los 10
     # ajustes que aprobo el auditor, estas reglas aciertan 4 y cubren el 32 % del importe
     # movido. Los seis que faltan son los grandes -solo la amortizacion de creditos movia mas
     # del doble que todo lo propuesto junto-. Sin decirlo, el descuadre de un borrador parece
-    # un error del cliente en vez de un trabajo a medias.
+    # un error del cliente en vez de un trabajo a medias. Por eso va como BORRADOR y no como
+    # NO CUADRA, que queda para los fallos aritmeticos (20/10/2026).
     comprobaciones.append((
-        "Esto es un estado de flujos terminado", False,
-        "Es un BORRADOR, no un estado de flujos. Estas reglas, medidas contra el único expediente que tiene "
-        "el estado hecho, acertaron 4 de los 10 ajustes que aprobó el auditor y cubrían el "
+        "Esto es un estado de flujos terminado", BORRADOR,
+        "la propuesta de ajustes del estado de flujos es un BORRADOR, no un estado de flujos "
+        "terminado. Estas reglas, medidas contra el único expediente que tiene el estado hecho, acertaron 4 de los 10 ajustes que aprobó el auditor y cubrían el "
         "32 % del importe movido. Lo que falta son los grandes: impuesto de sociedades, ventas "
         "de inmovilizado, provisiones, reclasificaciones y amortización de deuda. Con esto el "
         "estado NO va a cuadrar, y no cuadra porque está a medias, no porque haya un error en "
@@ -516,11 +677,13 @@ def main() -> int:
 
     comprobaciones.append((
         "Esto no está en Gesia", None,
-        "es una propuesta en papel. Cuando se teclee, va como ajuste NO APROBADO y con "
+        "la propuesta de ajustes del estado de flujos no está en Gesia: es una propuesta en "
+        "papel. Cuando se teclee, va como ajuste NO APROBADO y con "
         "«Asistente IA:» al principio de la descripción, para que no se confunda nunca con el "
         "trabajo del auditor"))
 
     _hoja_comprobaciones(wb, comprobaciones, a.cliente, a.ejercicio)
+    _uso_ia(wb, a, cuentas, cuadres, props, len(grupos), no_aplicadas)
 
     destino = os.path.abspath(a.salida)
     os.makedirs(os.path.dirname(destino), exist_ok=True)
@@ -533,20 +696,69 @@ def main() -> int:
     for p in props:
         total = redondear(sum(c for _, _, c, _ in p["lineas"]))
         print(f"    nº {p['numero']:>3} {p['desc'][:38]:38} {total:>14,.2f}")
-    malas = [t for t, ok, _ in comprobaciones if ok is False]
-    avisos = [t for t, ok, _ in comprobaciones if ok is None]
-    if malas or avisos:
+    # Las cuatro reglas, una linea cada una, aplicada o con el motivo: es lo que el modelo
+    # cuenta al entregar, y sin esto solo veia las que salian (registro del 21/10/2026).
+    print(f"  reglas verificadas ({len(REGLAS)}; cuéntalas todas al entregar, tal cual):")
+    for _, _, frase in reglas:
+        print(f"    - {frase}")
+    entrega = lineas_entrega(comprobaciones)
+    if entrega:
+        # el titulo es la AFIRMACION que se comprueba; si no se cumple, no se repite en
+        # afirmativo pegada a su negacion (ver lineas_entrega en lib_eeff, 25/09/2026)
         print("\nPARA CONTAR AL ENTREGAR (tal cual, sin resumir):")
-        for t, ok, d in comprobaciones:
-            # el titulo es la AFIRMACION que se comprueba; si no se cumple, no se repite en
-            # afirmativo pegada a su negacion (ver generar_efe.py, 25/09/2026)
-            if ok is False:
-                print(f"  - NO CUADRA: {d}")
-            elif ok is None:
-                print(f"  - A TENER EN CUENTA: {d}")
+        for linea in entrega:
+            print(f"  - {linea}")
         return 1
     print("  todas las comprobaciones cuadran")
     return 0
+
+
+def _uso_ia(wb: Workbook, a, cuentas: list, cuadres: list, props: list, plantillas: int,
+            no_aplicadas: dict | None = None) -> None:
+    """La hoja de evidencia del uso de IA, la primera del libro (lib_uso_ia).
+
+    Este es el papel en que la herramienta CALCULA cifras, y el resultado lo dice con nombre y
+    numero: que importes ha propuesto, con que reglas, y que es un borrador. Las comprobaciones
+    son los cuadres de la hoja Comprobaciones -no sus avisos, que no son comprobaciones y van al
+    resultado- mas la de los nombres de terceros.
+    """
+    hojas_papel = list(wb.sheetnames)      # antes de añadir la de uso de IA
+    reglas = sorted({p["regla"] for p in props})
+    propuestas = "; ".join(f"nº {p['numero']} {p['desc']} ({total_propuesto(p):,.2f} €)" for p in props)
+    if props:
+        calculado = (f"La herramienta ha calculado los importes propuestos para {len(props)} de las "
+                     f"{plantillas} plantillas de ajuste del catálogo del expediente ({propuestas}), "
+                     "con reglas contrastadas contra un expediente con el estado terminado ("
+                     + ", ".join(reglas).lower() + "), y ha escrito el texto de «De dónde sale» de "
+                     "cada una y el prefijo «Asistente IA:» de sus descripciones. ")
+    else:
+        calculado = (f"Ninguna de las {plantillas} plantillas del catálogo encaja con una regla "
+                     "contrastada: la herramienta no ha calculado ningún importe. ")
+    sin = plantillas - len(props)
+    resto = ("" if not sin else
+             "La otra plantilla queda sin propuesta, con su criterio, para el auditor. " if sin == 1 else
+             f"Las otras {sin} plantillas quedan sin propuesta, con su criterio, para el auditor. ")
+    if no_aplicadas:
+        # las que tienen regla y no se aplico, con su numero: no son «sin regla» (21/10/2026)
+        resto += ("De ellas, " + ("la nº " if len(no_aplicadas) == 1 else "las nº ")
+                  + ", ".join(sorted(no_aplicadas, key=lambda n: int(n) if n.isdigit() else 0))
+                  + (" tiene" if len(no_aplicadas) == 1 else " tienen")
+                  + " regla verificada que no se ha aplicado; el motivo está en la hoja Catalogo. ")
+    hoja_uso_ia(
+        wb,
+        papel=a.cliente + " · Ejercicio " + a.ejercicio + " · Propuesta de ajustes del estado de flujos",
+        procedimiento="estados-financieros",
+        descripcion=("Propuesta de importes para las plantillas de ajuste del estado de flujos de "
+                     "efectivo del expediente, calculados desde los saldos de sus cuentas."),
+        alcance=("Ejercicio " + a.ejercicio + ". Las " + str(plantillas) + " plantillas de ajuste del "
+                 "catálogo del módulo EFE del expediente y los saldos de su plan de cuentas."),
+        resultado=("Este libro: hojas " + ", ".join(hojas_papel) + ". " + calculado + resto
+                   + "Es un BORRADOR: no está en Gesia ni aprobado, y con él solo el estado de "
+                     "flujos no queda terminado."),
+        comprobaciones=[frase_terceros(cuentas, a.nombres_en_claro)] + frases_comprobacion(cuadres),
+        propuesta=PROPUESTA,
+        generado=a.generado,
+    )
 
 
 if __name__ == "__main__":

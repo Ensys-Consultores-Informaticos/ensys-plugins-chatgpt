@@ -1,12 +1,16 @@
 """Verifica el contrato y, si se puede seguir, escribe el papel de trabajo.
 
     python ejecutar_cancelacion.py --entrada extracto.csv \
-        --salida "<expediente>/AsistenteIA/CancelacionSaldos/Cancelacion Saldos <CLIENTE>.xlsx"
+        --salida "<expediente>/AsistenteIA/CancelacionSaldos/Cancelacion Saldos <CLIENTE>.xlsx" \
+        --generado 19/10/2026
+
+--generado es la fecha de generacion (dd/mm/aaaa) y la pone el modelo: nada aqui
+lee el reloj. Va a la hoja «Uso de IA» del papel.
 
 Es exactamente lo que hacian los dos pasos de antes, en una sola llamada:
 
     verificar_contrato.py --entrada X
-    generar_papel.py      --entrada X --salida Y
+    generar_papel.py      --entrada X --salida Y --generado F
 
 Por que existe: cada llamada obliga al modelo a un turno mas, y un turno
 cuesta la superficie entera del MCP -medida el 30/08/2026 en ~12.500 tokens-,
@@ -43,6 +47,8 @@ def main() -> int:
                     help="fichero exportado con exportar_consulta (.csv o .json)")
     p.add_argument("--salida", required=True,
                     help="ruta del .xlsx en la carpeta del expediente")
+    p.add_argument("--generado", required=True,
+                    help="fecha de generacion, dd/mm/aaaa: nada aqui lee el reloj")
     args = p.parse_args()
 
     # Los dos scripts leen sus propios argumentos de sys.argv. Se los damos
@@ -56,7 +62,8 @@ def main() -> int:
         return 2
 
     print("")
-    sys.argv = ["generar_papel.py", "--entrada", args.entrada, "--salida", args.salida]
+    sys.argv = ["generar_papel.py", "--entrada", args.entrada, "--salida", args.salida,
+                "--generado", args.generado]
     if generar_papel.main() != 0:
         return 2
 

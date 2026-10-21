@@ -57,6 +57,28 @@ VENTANA_DIAS = 45
 # centimo de redondeo es normal en facturas con varias lineas; mas no.
 TOL_IVA = 0.01
 
+# ── Asignacion dudosa (registro del 20/10/2026) ──
+# Un elemento cuya factura no estaba en la carpeta se caso con OTRA factura del mismo tercero,
+# sin numero legible, de importe muy distinto y fechada un mes antes, y salio como diferencia de
+# importe firme. Una asignacion que solo sostienen el tercero y la fecha -ni importe, ni numero-
+# sale marcada como DUDOSA, y no como diferencia, cuando ademas cumple una de estas dos:
+#
+# El importe del documento se aparta mas de la mitad del de libros (medido sobre el mayor de los
+# dos, con el candidato mas cercano: total, base o neto): el documento sostiene menos de la mitad
+# o mas del doble. Lo que explica una diferencia dentro de la MISMA factura -un descuento, un
+# concepto de mas, una cuota de IVA llevada al gasto (21 %)- se queda por debajo; por encima es
+# mas probable otro documento del mismo tercero. Es una razon y no una cifra a proposito: no mide
+# importancia relativa (regla 7, IR_T) sino si dos cifras son del mismo documento, y vale igual
+# para un elemento de 50 que de 50.000.
+UMBRAL_DIF_RELATIVA_DUDOSA = 0.5
+# La fecha del documento esta mas lejos de la de libros que la de cualquier documento atado por
+# importe o numero en ESTA muestra (regla 8: la linea base del propio cliente, que puede
+# registrar a fin de mes), y nunca menos de media ventana: ~3 semanas, menos que un ciclo de
+# facturacion mensual, asi que la factura del mes anterior del mismo proveedor queda fuera y un
+# retraso normal de recepcion queda dentro.
+DIAS_MINIMOS_DUDOSA = VENTANA_DIAS // 2
+PREFIJO_DUDOSA = "Asignación dudosa"
+
 # Los tres papeles que puede hacer el skill con un atributo. El cuarto -'auditor'-
 # es el que se pone cuando el control no se puede juzgar desde el documento
 # (autorizacion, pedido, anticipo, oportunidad del registro).
@@ -240,7 +262,7 @@ def afinar_columnas(muestra: list[dict], cols: dict) -> tuple[dict, list[str]]:
                 mejor_t = max(con_cuenta, key=lambda c: _tokens_de_cuenta(muestra, c))
                 if mejor_t != elegida:
                     avisos.append(f"la columna de tercero pasa de «{elegida}» a «{mejor_t}»: es la que el "
-                                  f"MCP ha tokenizado por la cuenta de la contrapartida "
+                                  f"MCP ha seudonimizado por la cuenta de la contrapartida "
                                   f"({_tokens_de_cuenta(muestra, mejor_t)} de {len(muestra)} filas), "
                                   f"y «{elegida}» solo lleva tokens de reserva")
                     cols[rol] = mejor_t
@@ -591,7 +613,7 @@ def _puntuar(fila: dict, cols: dict, fac: dict) -> dict:
     return {"numero": numero, "tipo_numero": tipo_num, "tercero": tercero, "importe": importe,
             "por_asiento": por_asiento,
             "fecha": fecha, "dias": dias, "diferencia": diferencia, "ambiguo": False,
-            "declarado": False,
+            "declarado": False, "dudosa": None,
             "puntos": puntos if ancla else 0, "num_fila": num_fila, "num_factura": num_fac}
 
 
@@ -680,6 +702,7 @@ def cruzar(muestra: list[dict], facturas: list[dict], cols: dict) -> dict:
                 p["ambiguo"] = True
         asig_fila[i] = (j, p)
         usadas.add(j)
+    _marcar_dudosas(muestra, facturas, cols, asig_fila)
     filas = []
     for i, fila in enumerate(muestra):
         if i in asig_fila:
@@ -690,11 +713,86 @@ def cruzar(muestra: list[dict], facturas: list[dict], cols: dict) -> dict:
                           "criterios": {"numero": False, "tipo_numero": "", "tercero": False,
                                         "importe": None, "fecha": False, "dias": None,
                                         "diferencia": None, "puntos": 0, "ambiguo": False,
-                                        "declarado": False,
+                                        "declarado": False, "dudosa": None,
                                         "num_fila": _numero_fila(fila, cols), "num_factura": None}})
     sin_fila = [f for j, f in enumerate(facturas) if j not in usadas]
     return {"filas": filas, "facturas_sin_fila": sin_fila,
             "candidatos_sueltos": _parejas_candidatas(filas, sin_fila, cols)}
+
+
+def _importe_mas_cercano(imp: float | None, fac: dict) -> tuple[str, float, float] | None:
+    """(etiqueta, valor, diferencia relativa) del importe del documento mas cercano al de libros.
+
+    La diferencia relativa se mide sobre el mayor de los dos: 0 es igual, 0,5 es que uno es la
+    mitad del otro, 1 es que uno de los dos es cero. None si no hay con que comparar."""
+    if imp is None:
+        return None
+    mejor = None
+    for etiqueta, valor in (("aplicable", parse_importe(fac.get("importe_aplicable"))),
+                            ("total", parse_importe(fac.get("total"))), ("base", base_de(fac)),
+                            ("neto", _neto_factura(fac))):
+        if valor is None:
+            continue
+        mayor = max(abs(imp), abs(valor))
+        if mayor == 0:
+            continue
+        rel = abs(abs(imp) - abs(valor)) / mayor
+        if mejor is None or rel < mejor[2]:
+            mejor = (etiqueta, valor, rel)
+    return mejor
+
+
+def _marcar_dudosas(muestra: list[dict], facturas: list[dict], cols: dict,
+                    asig_fila: dict[int, tuple[int, dict]]) -> None:
+    """Marca `dudosa` en las asignaciones que solo sostienen el tercero y la fecha y que, ademas,
+    tienen un importe muy distinto o una fecha lejana (UMBRAL_DIF_RELATIVA_DUDOSA,
+    DIAS_MINIMOS_DUDOSA). Lo atado a mano (`poblacion_id`) no se toca: lo decidio el auditor.
+
+    No desasigna nada: el documento sigue en su fila, con sus cifras, y quien lea el papel ve por
+    que no se afirma la diferencia. Desasignarlo lo haria desaparecer en «sin documento», y si era
+    el bueno se perderia justo la diferencia que la prueba busca."""
+    firmes = [abs(p["dias"]) for _, p in asig_fila.values()
+              if (p["importe"] or p.get("por_asiento") or p["numero"]) and p["dias"] is not None
+              and abs(p["dias"]) <= VENTANA_DIAS]
+    umbral_dias = max([DIAS_MINIMOS_DUDOSA] + firmes)
+    for i, (j, p) in asig_fila.items():
+        if (p.get("declarado") or p["importe"] or p.get("por_asiento") or p["numero"]
+                or p.get("tipo_numero") == "sufijo"):
+            continue
+        cercano = _importe_mas_cercano(_importe_fila(muestra[i], cols), facturas[j])
+        muy_distinto = cercano is not None and cercano[2] > UMBRAL_DIF_RELATIVA_DUDOSA
+        lejos = p["dias"] is not None and abs(p["dias"]) > umbral_dias
+        if muy_distinto or lejos:
+            p["dudosa"] = {"importe_doc": cercano[1] if cercano else None,
+                           "termino": cercano[0] if cercano else None,
+                           "dif_relativa": round(cercano[2], 4) if cercano else None,
+                           "muy_distinto": muy_distinto, "lejos": lejos, "umbral_dias": umbral_dias}
+
+
+def explicar_dudosa(item: dict, cols: dict) -> str:
+    """Por que una asignacion es dudosa, en una frase para la observacion. Sin juicio: las cifras
+    y lo que falta para atarla."""
+    fila, fac, c = item["fila"], item["factura"] or {}, item["criterios"]
+    d = c.get("dudosa") or {}
+    num_doc = str(fac.get("numero") or "").strip()
+    if not num_doc:
+        sin_num = "el documento no trae número legible"
+    elif c.get("num_fila"):
+        sin_num = f"su número ({num_doc}) no es el de libros ({c['num_fila']})"
+    else:
+        sin_num = "libros no trae número con que contrastarlo"
+    motivos = []
+    imp = _importe_fila(fila, cols)
+    if d.get("muy_distinto") and imp is not None and d.get("importe_doc") is not None:
+        motivos.append(f"importe en el documento {_fmt(abs(d['importe_doc']))} frente a "
+                       f"{_fmt(abs(imp))} en libros ({round(d['dif_relativa'] * 100):d} % distinto)")
+    if d.get("lejos") and c.get("dias") is not None:
+        motivos.append(f"fecha del documento {abs(c['dias'])} días "
+                       + ("antes" if c["dias"] > 0 else "después")
+                       + f" de la de libros (el umbral de esta muestra es {d.get('umbral_dias')} días)")
+    return (f"localizado solo por tercero y fecha; {sin_num}, y " + " y ".join(motivos)
+            + f". Puede ser otro documento del mismo tercero: no se afirma diferencia. Confírmalo y "
+              f"átalo con poblacion_id, o trátalo como no localizado ({fac.get('fichero')})")
 
 
 def _parejas_candidatas(filas: list[dict], sin_fila: list[dict], cols: dict) -> list[dict]:
@@ -765,6 +863,22 @@ def evaluar_fila(item: dict, cols: dict, atributos: list[dict], roles: dict[str,
     fila, fac, c = item["fila"], item["factura"], item["criterios"]
     imp = _importe_fila(fila, cols)
     resultados: dict[str, str] = {}
+    if fac is not None and c.get("dudosa"):
+        # Asignacion dudosa: ningun atributo del skill se da por Ok ni por hallazgo sobre un
+        # documento que puede no ser el del elemento. La explicacion va una vez, en el primer
+        # atributo que evalua el skill, y los demas remiten a el.
+        primero = None
+        for a in atributos:
+            aid = str(a.get("AtributoId"))
+            if roles.get(aid, ROL_AUDITOR) == ROL_AUDITOR:
+                resultados[aid] = "auditor"
+            elif primero is None:
+                primero = aid
+                resultados[aid] = (f"{PREFIJO_DUDOSA}: {explicar_dudosa(item, cols)}"
+                                   + (". Además había más de un candidato" if c.get("ambiguo") else ""))
+            else:
+                resultados[aid] = f"{PREFIJO_DUDOSA} (ver A{primero})"
+        return resultados
     for a in atributos:
         aid = str(a.get("AtributoId"))
         rol = roles.get(aid, ROL_AUDITOR)
@@ -852,6 +966,41 @@ def evaluar(cruce: dict, cols: dict, atributos: list[dict], roles: dict[str, str
     return out
 
 
+# ── El periodo de la poblacion frente al ejercicio de la prueba ──────────────
+
+def aviso_periodo_poblacion(params: dict) -> str:
+    """Un aviso si el rango de fechas de la poblacion (PoblacionFechaIni/Fin de los parametros)
+    no contiene el ejercicio de la prueba (FechaInicioAuditoria/FechaFinAuditoria). Cadena vacia
+    si lo contiene o si falta alguna de las cuatro fechas: es un aviso opcional, no un contrato.
+
+    No para nada: una poblacion de un trimestre para una prueba de corte es legitima. Pero una
+    poblacion del ejercicio anterior con la carpeta de facturas de este da documentos «sin
+    elemento» y elementos «sin documento» en serie, y eso se lee como extravio."""
+    pr = params.get("parametros") or {}
+    fuentes = [pr, params]
+
+    def _buscar(patron: str):
+        for fuente in fuentes:
+            for k, v in fuente.items():
+                if re.search(patron, str(k).lower()):
+                    return parse_fecha(v)
+        return None
+
+    p_ini, p_fin = _buscar(r"^poblacionfechaini"), _buscar(r"^poblacionfechafin")
+    e_ini, e_fin = parse_fecha(params.get("FechaInicioAuditoria")), parse_fecha(params.get("FechaFinAuditoria"))
+    if not (p_ini and p_fin and e_ini and e_fin):
+        return ""
+    f = lambda d: d.strftime("%d/%m/%Y")  # noqa: E731
+    rango = f"la población va del {f(p_ini)} al {f(p_fin)} y el ejercicio de la prueba del {f(e_ini)} al {f(e_fin)}"
+    if p_fin < e_ini or p_ini > e_fin:
+        return (f"{rango}: NO se solapan. Puede ser la población de otro ejercicio; si la carpeta de "
+                "documentos es la de este, los elementos saldrán sin documento en serie. Confírmalo con el auditor.")
+    if p_ini > e_ini or p_fin < e_fin:
+        return (f"{rango}: la población cubre solo una parte del ejercicio. Puede ser a propósito "
+                "(una prueba de corte); dilo al entregar.")
+    return ""
+
+
 # ── Comparacion con el auditor (calibracion) ──────────────────────────────────
 
 def comparar_con_auditor(evaluados: list[dict], evaluacion: dict | None, cols: dict,
@@ -919,36 +1068,100 @@ def _absoluta(ruta: str) -> str:
 
 
 def _bajo(base: str, nombre: str) -> str:
-    """base/nombre respetando el separador de la base: una carpeta de Windows lleva '\\'."""
+    """base/nombre respetando el separador de la base: una carpeta de Windows lleva '\\'. El
+    nombre puede traer subcarpetas (la ruta relativa de un manifiesto local, con '/')."""
     if _RE_RUTA_WINDOWS.match(base):
-        return base.rstrip("\\/") + "\\" + nombre
+        return base.rstrip("\\/") + "\\" + nombre.replace("/", "\\")
     return _absoluta(str(Path(base) / nombre))
 
 
+# El alias con que un documento sale del equipo desde el MCP 1.26.0, «12 - DOC 3fa2-f07.pdf»: la
+# misma expresion que la del MCP y la de preparar_documentos.py (registro del 21/10/2026).
+_RE_ALIAS_DOC = re.compile(r"(?:\d+ - )?(?:[A-Z0-9_]+ )?DOC ([0-9a-f]{4})-([fax]\d{2,})(?:\.[A-Za-z0-9]{2,5})?")
+
+
+def es_alias(nombre) -> bool:
+    return bool(_RE_ALIAS_DOC.fullmatch(str(nombre or "")))
+
+
+def _cargar_manifiesto(manifiesto: str | None) -> dict | None:
+    if not manifiesto:
+        return None
+    pm = Path(manifiesto)
+    if not pm.exists() and (pm.parent / "facturas" / "manifiesto.json").exists():
+        pm = pm.parent / "facturas" / "manifiesto.json"   # la carpeta de preparar_facturas, subida entera
+    if not pm.exists():
+        return None
+    man = cargar_json(str(pm))
+    return man if isinstance(man, dict) else None
+
+
 def rutas_documentos(manifiesto: str | None, carpeta: str | None) -> dict[str, str]:
-    """{nombre de fichero: ruta ABSOLUTA} para los hipervinculos del papel.
+    """{fichero: ruta ABSOLUTA} para los hipervinculos del papel.
 
     `carpeta` manda sobre el manifiesto, y es la salida para Cowork: la ruta que ve
     un script dentro del contenedor no existe en la maquina del auditor, asi que el
     vinculo se rehace sobre la carpeta de Windows que el usuario indique. Sin
     ninguna de las dos se devuelve vacio y las celdas quedan como texto: un vinculo
     roto en un papel de trabajo es peor que ninguno.
+
+    Desde el MCP 1.26.0 el manifiesto de preparar_facturas no trae `ruta` y su `fichero` es un
+    alias: el vinculo va a `<carpeta>\\<alias>` -la indicada o la del manifiesto- y `rehidratar`,
+    en el equipo del auditor, cambia el alias por la ruta relativa real. El manifiesto local de
+    preparar_documentos.py --carpeta si trae la ruta, y el nombre real en `reales`.
     """
     rutas: dict[str, str] = {}
-    if manifiesto:
-        pm = Path(manifiesto)
-        if not pm.exists() and (pm.parent / "facturas" / "manifiesto.json").exists():
-            pm = pm.parent / "facturas" / "manifiesto.json"   # la carpeta de preparar_facturas, subida entera
-        if pm.exists():
-            man = cargar_json(str(pm))
-            for d in man.get("documentos") or []:
-                nombre, ruta = d.get("fichero"), d.get("ruta")
-                if nombre and ruta:
-                    rutas[nombre] = _absoluta(ruta)
+    man = _cargar_manifiesto(manifiesto) or {}
+    docs = [d for d in man.get("documentos") or [] if d.get("fichero")]
+    reales = man.get("reales") or {}
     if carpeta:
         base = Path(carpeta)
-        nombres = set(rutas) or set()
-        if not nombres and base.is_dir():
-            nombres = {p.name for p in base.iterdir() if p.is_file()}
-        rutas = {n: _bajo(str(carpeta), n) for n in nombres}
+        if docs:
+            return {d["fichero"]: _bajo(str(carpeta), reales.get(d.get("id")) or d["fichero"]) for d in docs}
+        if base.is_dir():
+            return {p.name: _bajo(str(carpeta), p.name) for p in base.iterdir() if p.is_file()}
+        return {}
+    base_man = str(man.get("carpeta") or "")
+    for d in docs:
+        if d.get("ruta"):
+            rutas[d["fichero"]] = _absoluta(d["ruta"])
+        elif base_man and (_RE_RUTA_WINDOWS.match(base_man) or Path(base_man).is_absolute()):
+            rutas[d["fichero"]] = _bajo(base_man, d["fichero"])
     return rutas
+
+
+def nombres_locales(man: dict | None) -> dict[str, str]:
+    """{alias: nombre real} de un manifiesto LOCAL (preparar_documentos.py --carpeta), para que el
+    papel recupere el nombre al escribirse. Con el del MCP, vacio: ahi lo recupera `rehidratar`,
+    y el nombre real no esta en el contenedor."""
+    if not isinstance(man, dict) or man.get("origen") != "local":
+        return {}
+    reales = man.get("reales") or {}
+    claves = [d.get("fichero") for d in man.get("documentos") or []] + list(man.get("apartados") or [])
+    salida = {}
+    for alias in claves:
+        m = _RE_ALIAS_DOC.search(str(alias or ""))
+        if m and reales.get(m.group(2)):
+            salida[alias] = Path(reales[m.group(2)]).name
+    return salida
+
+
+def rehidratar_local(wb, nombres: dict[str, str]) -> int:
+    """Cambia en todas las celdas de texto del libro cada alias por su nombre real. Devuelve
+    cuantas celdas ha tocado. Lo impreso al chat sigue por alias: esto solo toca el fichero."""
+    if not nombres:
+        return 0
+    orden = sorted(nombres, key=len, reverse=True)
+    tocadas = 0
+    for ws in wb.worksheets:
+        for fila in ws.iter_rows():
+            for celda in fila:
+                v = celda.value
+                if isinstance(v, str) and "DOC " in v:
+                    nuevo = v
+                    for alias in orden:
+                        nuevo = nuevo.replace(alias, nombres[alias])
+                    if nuevo != v:
+                        celda.value = nuevo
+                        tocadas += 1
+    return tocadas

@@ -19,15 +19,50 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib_fsp import (  # noqa: E402
+    _distintos,
+    _tokens_de_cuenta,
     cargar_evaluacion,
     cargar_facturas,
     cargar_muestra,
     cargar_parametros,
     columnas_de_muestra,
+    detectar_columnas,
     parse_fecha,
     parse_importe,
     salida_utf8,
 )
+
+
+def tercero_del_mcp(muestra: list[dict], cols: dict, avisos_col: list[str]) -> tuple[str, list[str]]:
+    """(linea informativa, avisos que quedan) cuando el tercero es la columna que eligio el MCP.
+
+    Al exportar la muestra tokenizada, el MCP decide el mismo cual es la columna del tercero, la
+    seudonimiza por la cuenta y dice por que descarta las demas («'NombreCuenta' descartada porque
+    tiene un solo valor en todas las filas»). `afinar_columnas` se va a esa misma columna, y hasta
+    el registro del 21/10/2026 eso salia como aviso A00, con otro motivo («solo lleva tokens de
+    reserva») y entre lo que hay que contar al entregar: para el auditor era ruido, porque el
+    cambio es automatico y no afecta al resultado. Ahora es una linea C02, que no se cuenta.
+
+    Solo en ese caso. Un cambio por el numero de valores distintos, sin tokens de cuenta, lo
+    decide el skill y sigue siendo A00. Es la misma funcion que en fsp-cumplimiento.
+    """
+    ini = detectar_columnas(muestra[0])[0].get("tercero")
+    fin = cols.get("tercero")
+    # la condicion es exactamente la rama del MCP de afinar_columnas: la final lleva tokens de
+    # cuenta y la que se habria elegido por el nombre no lleva ninguno
+    if not fin or fin == ini or not _tokens_de_cuenta(muestra, fin) or (ini and _tokens_de_cuenta(muestra, ini)):
+        return "", avisos_col
+    n = len(muestra)
+    linea = (f"C02 · tercero = «{fin}»: es la columna que el MCP eligió al exportar la muestra y seudonimizó "
+             f"por la cuenta ({_tokens_de_cuenta(muestra, fin)} de {n} filas)")
+    if ini:
+        d = _distintos(muestra, ini)
+        motivo = ("viene vacía" if d == 0 else f"tiene un solo valor en las {n} filas" if d == 1
+                  else "solo lleva tokens de reserva, que no atan a ningún tercero")
+        linea += f"; «{ini}» no sirve para cruzar el tercero: {motivo}"
+    linea += ". Cambio automático: no afecta al resultado y no hay que contarlo."
+    # la rama del MCP deja un solo aviso de tercero, y es este
+    return linea, [a for a in avisos_col if not a.startswith("la columna de tercero ")]
 
 
 def main() -> int:
@@ -58,6 +93,9 @@ def main() -> int:
     # lo que se mide, asi que sin el no hay prueba; la fecha solo ayuda a cruzar.
     cols, faltan, avisos_col = columnas_de_muestra(muestra)
     print("C02 · columnas: " + ", ".join(f"{r}={c}" for r, c in cols.items()))
+    info_tercero, avisos_col = tercero_del_mcp(muestra, cols, avisos_col)
+    if info_tercero:
+        print(info_tercero)
     for a in avisos_col:
         avisos.append("A00 · " + a)
     if "importe" not in cols:

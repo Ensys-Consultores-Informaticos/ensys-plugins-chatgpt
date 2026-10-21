@@ -1,7 +1,8 @@
 """Escribe el papel de trabajo de cancelacion de saldos en Excel.
 
     python generar_papel.py --entrada extracto.csv \
-        --salida "<expediente>/AsistenteIA/CancelacionSaldos/Cancelacion Saldos <CLIENTE>.xlsx"
+        --salida "<expediente>/AsistenteIA/CancelacionSaldos/Cancelacion Saldos <CLIENTE>.xlsx" \
+        --generado 19/10/2026
 
 Una hoja "Resumen" con una fila por cuenta, y una hoja por cuenta con el
 detalle FECHA / CUENTA / NOMBRE / [CONCEPTO, si viene] / SALDO / INDICE / ORIGEN, en
@@ -23,6 +24,13 @@ como valor. Este papel tiene que leerse igual en Cowork y en la maquina del
 auditor sin depender de si hay LibreOffice o Excel instalado para
 recalcular -- a diferencia de un artefacto de Cowork, este es un skill que
 tambien corre en local.
+
+El libro empieza por la hoja «Uso de IA» (lib_uso_ia, docs/evidencia-uso-ia.md):
+la evidencia de que el papel se hizo con una herramienta de IA, con lo del equipo
+en blanco. La marca «Uso de IA: pendiente de verificacion» va en la fila 2 de la
+hoja Resumen, porque este papel no tiene bloque de Realizado / Verificado.
+
+Nada aqui lee el reloj: la fecha de generacion llega con --generado (regla 4).
 """
 from __future__ import annotations
 
@@ -40,9 +48,21 @@ from lib_cancelacion import (  # noqa: E402
     MAX_GRUPO_COMBOS,
     MAX_LEFTOVER_FOR_COMBOS,
     ORIGEN_CONTABLE,
+    PASO_ACUMULACION,
+    PASO_COMBINACION,
     analizar_hallazgos,
     cargar_extracto,
     procesar_extracto,
+)
+from lib_uso_ia import hoja_uso_ia, marcar_papel  # noqa: E402
+
+# Lo que el equipo deberia contrastar. Describe, no dictamina: el alcance es suyo.
+PROPUESTA = (
+    "Cotejar con documentos una selección de los grupos emparejados —la factura contra su "
+    "cobro o pago— y el saldo vivo de cada cuenta (lo que queda en ÍNDICE 0) contra el saldo "
+    "de esa cuenta en el expediente. Revisar en particular los grupos formados por "
+    "combinación o por acumulación (columna ORIGEN), que cierran por aritmética sobre "
+    "importes que no se parecen y son los menos seguros."
 )
 
 FONT = "Arial"
@@ -441,6 +461,8 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--entrada", required=True)
     p.add_argument("--salida", required=True)
+    p.add_argument("--generado", required=True,
+                   help="fecha de generacion, dd/mm/aaaa: nada aqui lee el reloj")
     args = p.parse_args()
 
     df = cargar_extracto(args.entrada)
@@ -458,15 +480,22 @@ def main() -> int:
     _rellenar_resumen(ws_resumen, filas_resumen)
     hallazgos = analizar_hallazgos(df, por_cuenta)
     _hoja_criterios(ws_criterios, hallazgos)
+    # la marca, en la fila 2 del Resumen: este papel no tiene bloque de Realizado /
+    # Verificado, y el Resumen es la hoja que se abre para ver el agregado
+    marcar_papel(ws_resumen, "A2", "B2")
+    ws_resumen.merge_cells("B2:E2")
+    _uso_ia(wb, args, df, por_cuenta, filas_resumen, hallazgos)
 
     salida = Path(args.salida)
     salida.parent.mkdir(parents=True, exist_ok=True)
     try:
         wb.save(salida)
     except PermissionError:
-        # Pasa cuando se regenera el papel con el fichero abierto en Excel.
+        # Pasa cuando se regenera el papel con el fichero abierto en Excel, y tambien
+        # cuando el entorno no deja escribir en esa carpeta (ChatGPT, registro del 21/10/2026).
         print("ERROR: no se puede escribir " + str(salida))
-        print("       El fichero esta abierto en Excel. Cierralo y repite.")
+        print("       O esta abierto en Excel (cierralo y repite), o el entorno no tiene permiso")
+        print("       para escribir en esa carpeta (pide el permiso y repite).")
         return 2
 
     print("Escrito: " + str(salida))
@@ -530,7 +559,134 @@ def main() -> int:
     if con_error:
         print("  AVISO: " + str(len(con_error)) + " cuenta(s) no verifican -- revisar "
               "hoja Resumen antes de entregar")
+    print("  hoja «Uso de IA» con huecos de la aplicacion: sellar_uso_ia sobre el papel archivado")
     return 0
+
+
+def _euro(v) -> str:
+    """Importe en formato español, para los textos de la hoja «Uso de IA»."""
+    return format(float(v), ",.2f").replace(",", "X").replace(".", ",").replace("X", ".") + " €"
+
+
+def _comprobaciones(df, por_cuenta: dict, filas: list[dict]) -> list[str]:
+    """Lo que ha comprobado la propia herramienta, calculado AQUI sobre lo que lleva el papel.
+
+    Va en «Resultado», nunca en la verificacion del equipo. Cada frase tiene que ser
+    verdad sobre este libro: si una comprobacion falla, el texto lo dice con ATENCION,
+    no se omite."""
+    out = []
+    # 1 · que no se ha quedado nada del extracto fuera del papel
+    n_cuentas, n_apuntes = int(df["CUENTA"].nunique()), len(df)
+    en_papel = sum(f["apuntes"] for f in filas)
+    if len(filas) == n_cuentas and en_papel == n_apuntes:
+        out.append("Cuentas del extracto en el papel: " + str(n_cuentas) + " de " + str(n_cuentas)
+                   + ", una hoja por cuenta; apuntes: " + str(n_apuntes) + " de " + str(n_apuntes)
+                   + ". Ninguno ha quedado fuera.")
+    else:
+        out.append("ATENCIÓN: el extracto trae " + str(n_cuentas) + " cuenta(s) y " + str(n_apuntes)
+                   + " apunte(s), y el papel lleva " + str(len(filas)) + " y " + str(en_papel) + ".")
+    # 2 · los grupos que forma el procedimiento suman cero, cada uno
+    nuevos = sum(info["num_grupos_nuevos"] for _, info in por_cuenta.values())
+    malos = sum(len(info["grupos_con_error"]) for _, info in por_cuenta.values())
+    con_error = [str(c) for c, (_, info) in por_cuenta.items() if info["grupos_con_error"]]
+    if not con_error:
+        out.append("Grupos formados por el procedimiento que suman cero al céntimo: "
+                   + str(nuevos) + " de " + str(nuevos) + ".")
+    else:
+        out.append("ATENCIÓN: " + str(malos) + " de los " + str(nuevos) + " grupos formados por el "
+                   "procedimiento no suman cero, en " + str(len(con_error)) + " cuenta(s) ("
+                   + ", ".join(con_error[:8]) + ("…" if len(con_error) > 8 else "") + ").")
+    # 3 · la columna VERIFICACION del Resumen
+    revisar = [str(f["cuenta"]) for f in filas if not f["ok"]]
+    if not revisar:
+        out.append("Columna VERIFICACION de la hoja Resumen: OK en " + str(len(filas)) + " de "
+                   + str(len(filas)) + " cuenta(s). Lo pendiente (ÍNDICE 0) es el total de cada "
+                   "cuenta menos el descuadre del punteo previo.")
+    else:
+        out.append("ATENCIÓN: columna VERIFICACION de la hoja Resumen en REVISAR en "
+                   + str(len(revisar)) + " de " + str(len(filas)) + " cuenta(s) ("
+                   + ", ".join(revisar[:8]) + ("…" if len(revisar) > 8 else "")
+                   + "): lo pendiente no cuadra con el total de la cuenta.")
+    # 4 · el punteo previo, respetado: mismo numero y mismos apuntes, y los nuevos por encima
+    con_previo = [r for r, _ in por_cuenta.values() if "INDICE_PREVIO" in r.columns]
+    if not con_previo:
+        out.append("El extracto no trae punteo previo (columna Indice): todos los grupos son de "
+                   "este papel.")
+        return out
+    previos = sum(info["num_grupos_previos"] for _, info in por_cuenta.values())
+    tocados = 0
+    for r in con_previo:
+        prev = pd.to_numeric(r["INDICE_PREVIO"], errors="coerce").fillna(0).astype(int).clip(lower=0)
+        tocados += int(((prev > 0) & ((r["INDICE"] != prev) | (r["ORIGEN"] != ORIGEN_CONTABLE))).sum())
+        nuevos_idx = r.loc[(prev == 0) & (r["INDICE"] > 0), "INDICE"]
+        tocados += int((nuevos_idx <= int(prev.max())).sum())
+    if tocados:
+        out.append("ATENCIÓN: el punteo previo de la contabilidad no se ha conservado tal cual: "
+                   + str(tocados) + " apunte(s) cambian de índice o comparten número con un grupo "
+                   "nuevo.")
+    else:
+        out.append("Punteo previo de la contabilidad (columna Indice) respetado: grupos que traía "
+                   "el diario: " + str(previos) + "; conservan su número y sus apuntes, y los "
+                   "grupos nuevos se numeran por encima.")
+    descuadrados = [(c, info) for c, (_, info) in por_cuenta.items()
+                    if info["grupos_previos_descuadrados"]]
+    if descuadrados:
+        n = sum(len(info["grupos_previos_descuadrados"]) for _, info in descuadrados)
+        out.append("Grupos del punteo previo que no suman cero: " + str(n) + " de " + str(previos)
+                   + ", en " + str(len(descuadrados)) + " cuenta(s), por "
+                   + _euro(sum(i["descuadre_punteo_previo"] for _, i in descuadrados))
+                   + ". Se respetan tal cual y constan en la columna DESCUADRE PUNTEO PREVIO del "
+                   "Resumen.")
+    elif previos:
+        out.append("Grupos del punteo previo que suman cero: " + str(previos) + " de "
+                   + str(previos) + ".")
+    return out
+
+
+def _uso_ia(wb: Workbook, args, df, por_cuenta: dict, filas: list[dict], h: dict) -> None:
+    """La hoja de evidencia del uso de IA, la primera del libro (lib_uso_ia)."""
+    desde, hasta = df["FECHA"].min(), df["FECHA"].max()
+    periodo = ("del " + desde.strftime("%d/%m/%Y") + " al " + hasta.strftime("%d/%m/%Y")
+               if pd.notna(desde) and pd.notna(hasta) else "")
+    cuentas = [str(f["cuenta"]) for f in filas]
+    if len(cuentas) <= 10:
+        que = ", ".join(cuentas)
+    else:
+        grupos = sorted({c[:3] for c in cuentas})
+        que = "subcuentas de " + ", ".join(grupos[:12]) + ("…" if len(grupos) > 12 else "")
+    nuevos = sum(f["grupos_nuevos"] for f in filas)
+    previos = sum(f["grupos_previos"] for f in filas)
+    sin_cancelar = sum(f["sin_cancelar"] for f in filas)
+    pendiente = sum(f["pendiente"] for f in filas)
+    por_paso = h.get("grupos_por_paso") or {}
+    propuesta = PROPUESTA
+    arit = {k: por_paso.get(k, 0) for k in (PASO_COMBINACION, PASO_ACUMULACION)}
+    if any(arit.values()):
+        propuesta += (" En este papel: " + str(arit[PASO_ACUMULACION]) + " por acumulación y "
+                      + str(arit[PASO_COMBINACION]) + " por combinación.")
+    hoja_uso_ia(
+        wb,
+        papel=Path(args.salida).stem + (" · apuntes " + periodo if periodo else ""),
+        procedimiento="cancelacion-saldos",
+        descripcion=("Cancelación de saldos: emparejamiento, dentro de cada cuenta del mayor, de "
+                     "los apuntes que se cancelan entre sí —típicamente facturas contra cobros o "
+                     "pagos—, respetando el punteo previo de la contabilidad, para localizar lo que "
+                     "compone el saldo vivo."),
+        alcance=(str(len(cuentas)) + " cuenta(s) del diario del cliente (" + que + "), "
+                 + str(len(df)) + " apuntes" + (" " + periodo if periodo else "") + "."),
+        resultado=("Este libro: hojas Criterios y hallazgos y Resumen, y una hoja por cuenta ("
+                   + str(len(filas)) + "). Grupos formados por el procedimiento: " + str(nuevos)
+                   + (" (" + " · ".join(k + " " + str(v) for k, v in por_paso.items()) + ")"
+                      if por_paso else "")
+                   + "; punteados ya en la contabilidad: " + str(previos)
+                   + "; apuntes sin cancelar (ÍNDICE 0): " + str(sin_cancelar) + ", que suman "
+                   + _euro(pendiente) + ". El modelo no ha redactado ningún texto del papel: los "
+                     "grupos, el ÍNDICE y los importes los calcula el script, y los textos de la "
+                     "hoja Criterios y hallazgos son fijos del procedimiento."),
+        comprobaciones=_comprobaciones(df, por_cuenta, filas),
+        propuesta=propuesta,
+        generado=args.generado,
+    )
 
 
 if __name__ == "__main__":

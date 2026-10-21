@@ -24,7 +24,13 @@ quien lee esta prueba, y ha pasado.
 """
 from __future__ import annotations
 
-from lib_fsp import _fmt, _irpf, base_de, parse_importe
+import sys
+from pathlib import Path
+
+# Su carpeta en la ruta de importacion aunque quien lo importe no la haya puesto: con
+# `python -I` la carpeta del script no entra sola (registro del 20/10/2026).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib_fsp import _fmt, _irpf, base_de, parse_importe  # noqa: E402
 
 TOL = 0.01          # un céntimo, igual que en el cruce
 TOL_IVA_PISTA = 0.5  # margen al reconocer una diferencia como cuota de IVA
@@ -127,6 +133,13 @@ def evaluar_mum(cruce: dict, cols: dict) -> list[dict]:
         elif fac is None:
             nota = ("Documento no localizado en la carpeta: sin él no se puede fijar el importe "
                     "según auditoría")
+        elif c.get("dudosa"):
+            # Asignacion dudosa (lib_fsp, 20/10/2026): solo la sostienen el tercero y la fecha, sin
+            # numero, con importe muy distinto o fecha lejana. Proponer el importe del documento
+            # declararia un error que puede ser de OTRO documento, y ese error se proyectaria a la
+            # poblacion entera. Queda sin medir, como el «sin criterio de comparación» (decision
+            # del 20/10/2026), y se cuenta aparte.
+            nota = _nota_dudosa(c)
         elif parse_importe(fac.get("importe_aplicable")) is not None:
             # lo declarado a mano manda: se mide contra esa parte, y se dice en la observacion
             usado = termino or "total"
@@ -173,8 +186,21 @@ def evaluar_mum(cruce: dict, cols: dict) -> list[dict]:
                 if pista:
                     nota = pista
         salida.append({**it, "saldo": saldo, "repeticiones": reps, "termino": usado,
-                       "saldo_auditoria": saldo_aud, "error": error, "tasa": tasa, "nota": nota})
+                       "saldo_auditoria": saldo_aud, "error": error, "tasa": tasa, "nota": nota,
+                       "dudosa": bool(fac is not None and saldo is not None and c.get("dudosa"))})
     return salida
+
+
+def _nota_dudosa(c: dict) -> str:
+    """El motivo de una asignacion dudosa, corto: las cifras ya estan en sus columnas."""
+    d = c.get("dudosa") or {}
+    motivos = []
+    if d.get("muy_distinto") and d.get("dif_relativa") is not None:
+        motivos.append(f"importe un {round(d['dif_relativa'] * 100):d} % distinto")
+    if d.get("lejos") and c.get("dias") is not None:
+        motivos.append(f"fecha {abs(c['dias'])} días " + ("antes" if c["dias"] > 0 else "después"))
+    return ("ATENCIÓN, asignación dudosa: documento del mismo tercero sin número que lo ate, "
+            + " y ".join(motivos) + "; puede ser otro. Sin medir: confirma el documento con poblacion_id")
 
 
 def _nota_asiento(fila: dict, caso: str) -> str:
@@ -252,6 +278,8 @@ def recuento(evaluados: list[dict]) -> dict:
         "sin_documento": len(evaluados) - len(con_doc),
         "medidos": len(medidos),
         "sin_medir": len(evaluados) - len(medidos),
+        # dentro de los sin medir y contadas aparte: el documento puede no ser el del elemento
+        "dudosas": len([e for e in evaluados if e.get("dudosa")]),
         "sin_error": len([e for e in medidos if abs(e["error"]) <= TOL]),
         "con_error": len(exceso) + len(defecto),
         "n_exceso": len(exceso),

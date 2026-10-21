@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import contextlib
 import io
+import re
 import sys
 from pathlib import Path
 
@@ -32,6 +33,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import generar_papel  # noqa: E402
 import verificar_contrato  # noqa: E402
+from lib_fsp import salida_utf8  # noqa: E402
 
 
 def _capturar(fn) -> tuple[int, str]:
@@ -56,7 +58,8 @@ def _para_el_usuario(verif: str, papel: str) -> None:
     lineas = []
     for l in verif.splitlines():
         t = l.strip()
-        if t.startswith("A0") or t.startswith("[A]") or (t.startswith("C0") and "ERROR" in t):
+        # A00..A10: los avisos del contrato, todos (con «A0» a secas se perdia el A10)
+        if re.match(r"A\d\d ", t) or t.startswith("[A]") or (t.startswith("C0") and "ERROR" in t):
             lineas.append("  " + t)
     claves = ("·", "frente al auditor", "incorrecciones", "NO son la proyección",
               "esta población contabiliza", "sin diferencia", "elementos ")
@@ -74,6 +77,10 @@ def _para_el_usuario(verif: str, papel: str) -> None:
 
 
 def main() -> int:
+    # Aqui y no solo en los main() de debajo: esos corren con la salida redirigida a un buffer,
+    # asi que su reconfiguracion no llega a la consola, y en Windows sin PYTHONIOENCODING lo que
+    # se reimprime salia en cp1252 (medido con `python -I`, que ignora esa variable).
+    salida_utf8()
     p = argparse.ArgumentParser()
     p.add_argument("--muestra", required=True)
     p.add_argument("--parametros", required=True)

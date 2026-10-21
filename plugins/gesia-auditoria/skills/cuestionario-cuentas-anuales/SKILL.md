@@ -66,7 +66,10 @@ variables de shell: en Windows el intérprete no siempre es el mismo y una varia
 funciona en una consola no existe en la otra.
 
 - `<PLUGIN>` — la raíz del plugin instalado
-- `<TRABAJO>` — una carpeta de trabajo local para esta sesión, fuera del expediente
+- `<TRABAJO>` — una carpeta de trabajo local NUEVA para esta ejecución, con el nombre del
+  procedimiento y la hora, fuera del expediente. No reutilices la de otro procedimiento ni la
+  de otra conversación: los ficheros de trabajo se pisarían. Entrega los papeles por su nombre
+  exacto, nunca con un comodín, y al terminar bórrala; si no se deja, di su ruta exacta.
 
 **ChatGPT Cowork corre en el equipo del auditor**: los scripts y el MCP comparten disco, así
 que lo que exporta el MCP lo leen los scripts directamente y el papel se escribe en la ruta
@@ -79,13 +82,31 @@ del expediente sin pasos intermedios.
 ### Paso 1 — Expediente
 
 ```
-configurar()            # sin parámetros: ver estado
+configurar(perfil = "cuestionario-cuentas-anuales")
 contexto_expediente()
 ```
 
-Si falta `gs3_file`, **pide la ruta al usuario**. No la adivines. Si el servidor API no
-responde, dile que lo arranque en *Herramientas > Gesia - Cuadro de mando > Arrancar
-servidor API*: hay que hacerlo cada vez que se abre Gesia.
+**El perfil va lo primero**: marca el comienzo del procedimiento, y desde ahí el MCP lleva
+la cuenta de lo que se facilita a la herramienta, que es lo que el papel de trabajo dirá en su
+apartado de uso de IA. Este perfil no seudonimiza nada: el cuestionario es texto del máster y no
+lleva terceros. Las cuentas anuales en PDF no pasan por el MCP —las lees tú directamente, en
+claro— y por eso el papel las declara aparte (paso 8).
+
+**`contexto_expediente()` va siempre, después del perfil, aunque ya lo tengas en la
+conversación.** Lo que se leyó antes con otro perfil cuenta para aquel procedimiento, no para
+este: si no lo vuelves a pedir, el apartado de uso de IA no lo lista como facilitado y el papel
+dice menos de lo que se usó.
+
+Si falta `gs3_file`, **pide la ruta al usuario**. No la adivines. Si `configurar` dice que el
+servidor API no responde, **llama a `arrancar_api`**: lo levanta en el equipo del auditor y
+sigues. Solo si eso falla, díselo al auditor.
+
+**Si `configurar` —o cualquier otra llamada del MCP— avisa de que otra conversación está
+trabajando con otro expediente o con otro perfil en el mismo servidor**, díselo al auditor tal
+cual y **no sigas hasta que confirme**. Las conversaciones abiertas a la vez comparten el MCP:
+cada `configurar` cambia el expediente y el perfil de todas, y lo que una exporta o sella puede
+acabar en el papel de la otra sin que nada lo avise.
+
 
 ### Paso 2 — Localizar el cuestionario
 
@@ -117,8 +138,16 @@ pídele la referencia al usuario**. No elijas tú.
 
 ### Paso 3 — Pedir y preparar las cuentas anuales
 
-**Sin el PDF no se responde nada.** Pídeselo al usuario: puede subirlo o indicarte dónde
-está en la carpeta del expediente.
+**Sin el PDF no se responde nada, y el PDF lo indica el usuario.** Si no te ha dicho cuál es,
+pregúntaselo —puede subirlo o indicarte dónde está— **aunque veas un candidato obvio en la
+carpeta del expediente**: un borrador sin firmar, las cuentas del ejercicio anterior o una
+versión reformulada tienen el mismo aspecto, y contestar contra el documento equivocado da un
+cuestionario entero que parece bueno.
+
+**Si hay más de una copia** —o más de un PDF que pueda serlo—, lístalas con su nombre, su
+carpeta, su tamaño y su fecha de modificación, y pide que confirme cuál. No elijas tú por la
+fecha ni por el tamaño. El que confirme es el que pasas a `--pdf` en el paso 8, y el papel lo
+dice en su ficha.
 
 **Lee el PDF directamente, sin convertirlo con ningún script.** La herramienta de lectura
 abre PDFs, y los abre igual de bien cuando son un escaneo — que es el caso normal, no la
@@ -128,13 +157,27 @@ el expediente de calibración eran 31 páginas con **cero** caracteres extraíbl
 Van en tramos de 20 páginas como máximo por lectura, así que unas cuentas anuales normales
 son dos lecturas.
 
+**Que el PDF es de esta sociedad se comprueba en la imagen de la página, no en el texto
+extraído.** La cabecera con el nombre de la sociedad va a menudo como **logotipo**, que es una
+imagen y no sale en la extracción de texto: buscar la razón social de `contexto_expediente` en
+el texto da cero coincidencias aunque el nombre esté impreso en todas las hojas (registro del
+21/10/2026). Mira la portada y la cabecera de las páginas como imagen; solo si tampoco ahí
+aparece el nombre, o aparece otro, pregúntale al auditor.
+
 Léelas **todas** antes de contestar la primera pregunta.
 
 **Y en cuanto acabes de leerlas, escribe tus notas en disco**, en
 `<TRABAJO>/memoria_notas.md`: qué notas tiene la memoria, en qué página del PDF empieza cada
 una, y los datos que ya sepas que vas a necesitar —importes del balance, criterios de la
-nota 4, lo que aparezca y lo que no—. La numeración interna del documento no suele coincidir
-con la del PDF, así que anota las dos.
+nota 4, lo que aparezca y lo que no—.
+
+**Las páginas se citan siempre por la numeración del fichero PDF**: la primera página del
+fichero es la 1, aunque sea la portada y el documento imprima otro número. Es la que usa la
+lectura por tramos, la única que existe también en un escaneo sin numerar, y la que encuentra
+el auditor al abrir el fichero. La numeración impresa no suele coincidir —portada, índice y
+hojas de firmas no la llevan—: en las notas puedes apuntarla para orientarte, pero en
+`evidencia` va siempre la del PDF (`"Nota 9, p. 14"`). El papel declara esta numeración en
+una línea de su ficha.
 
 No es burocracia: **contestar 137 preguntas es una sesión larga y el contexto se compacta a
 mitad.** Cuando pasa, sin esas notas hay que releer el PDF entero otra vez. Medido en
@@ -151,8 +194,31 @@ solo vuelves al PDF para lo que las notas no resuelvan.
 **El dato entra por el MCP, siempre.** Los scripts de este skill no hablan con el API de
 Gesia.
 
-**Una sola consulta, y a fichero.** El cuestionario no cabe en una respuesta —el PYME son
-unos 129.000 bytes y `consultar_gesia` corta en 60.000—, pero eso da igual porque
+**Primero, el código del cuestionario**: el `CodigoGuia` de `DetalleGuias`, que es lo que
+filtra la exportación. Se saca de la propia `DetalleGuias`, agrupando por la referencia del
+paso 2:
+
+```
+consultar_gesia(sql =
+  "SELECT CodigoGuia, Count(*) AS Filas
+   FROM DetalleGuias
+   WHERE CodigoGuia LIKE '<la referencia del paso 2>%'
+   GROUP BY CodigoGuia")
+```
+
+Sale una fila por cuestionario cuyo código empiece así, con su número de filas: pocas por
+construcción. Quédate con la que **coincide con la referencia**; si ninguna coincide, o hay
+más de una que podría ser, enséñaselas al usuario y que diga cuál. Si no sale ninguna, el
+cuestionario no tiene contenido en este expediente: **para** y dilo.
+
+**No lo busques por otro camino**, que ya se ha intentado: `Referencias` no tiene columna
+`CodigoGuia`, y `Guias` no tiene `CodigoReferencia`. JET no responde «columna desconocida»
+sino **«No se han especificado valores para algunos parámetros»**, que no dice qué falla. En el
+único expediente donde se ha medido, el código coincidía con la referencia (`AG)20/01` →
+`AG)20/01`); es una sola medida, así que compruébalo con la consulta y no lo des por hecho.
+
+**Después, el cuestionario: una sola consulta, y a fichero.** El cuestionario no cabe en una
+respuesta —el PYME son unos 129.000 bytes y `consultar_gesia` corta en 60.000—, pero eso da igual porque
 `exportar_consulta` escribe en disco y a ti solo te devuelve el recuento:
 
 ```
@@ -161,7 +227,7 @@ exportar_consulta(
                 DesglosePunto, Descripcion, CodigoClaseReferencia,
                 CodigoReferencia, CodigoRealizado, Respuesta, Comentario
          FROM DetalleGuias
-         WHERE CodigoGuia = '<el código localizado>'
+         WHERE CodigoGuia = '<el CodigoGuia de la consulta anterior>'
          ORDER BY Val(CodigoOrden)",
   ruta = "<en local: <TRABAJO>/cuestionario.json — en Cowork: <raíz conectada>/_tmp_cowork/cuestionario.json>")
 ```
@@ -187,7 +253,7 @@ que contestar una sección concreta, y para eso está `mostrar_seccion.py`.
 
 ```bash
 python "<PLUGIN>\skills\cuestionario-cuentas-anuales\scripts\verificar_contrato.py" \
-    --cuestionario "<TRABAJO>\cuestionario.json" --guia "<el código que hayas localizado>"
+    --cuestionario "<TRABAJO>\cuestionario.json" --guia "<el CodigoGuia del paso 4>"
 ```
 
 Salida `2` → **para**. No se genera nada. Salida `1` son avisos: léelos, sobre todo el
@@ -287,9 +353,26 @@ Ve acumulando en `<TRABAJO>/respuestas.json`:
 puede contestar, va un `4` con el motivo. Las **cabeceras de sección no se responden**:
 `mostrar_seccion.py` ya no te las enseña.
 
-`evidencia` es obligatoria para un `1`. Sin ella, la respuesta es `4`.
+`evidencia` es obligatoria para un `1`. Sin ella, la respuesta es `4`. Y la página que cite
+es la del fichero PDF (paso 3), nunca la impresa.
+
+**Da noticias al usuario al terminar cada bloque de secciones** —cada tres o cuatro secciones,
+o unas treinta preguntas—, en una línea: «Secciones 1 a 4 contestadas: 38 de 137 preguntas, 2
+en `2` y 6 en `4`. Sigo con la 5.» Y guarda `respuestas.json` en ese momento, no solo al final.
+Contestar el cuestionario entero es la parte más larga del skill y no hay otra forma de que el
+auditor sepa que avanza: en el registro del 21/10/2026 el entorno avisó cuatro veces de que el
+usuario no tenía noticias, y la conversación acabó resumida a mitad. Con el avance en disco y
+dicho en el chat, tras un resumen se sigue desde el último bloque.
 
 ### Paso 7 — Generar el Excel
+
+**Si los ficheros ya existen, una sola pregunta, antes de generar el Excel.** Mira si en
+`<expediente>\AsistenteIA\CuestionarioCuentasAnuales\` ya están el Excel de este paso o el Word
+del siguiente. Si hay alguno, **pregunta al auditor una vez, para los dos**:
+sobrescribirlos, o guardar los nuevos con « (rehecho AAAA-MM-DD)» antes de la extensión, con la
+fecha de hoy. Ni los sobrescribas sin preguntar ni inventes otro sufijo: al repetir un
+procedimiento el mismo día, una ejecución pisó el papel y otra improvisó el nombre (registro del
+21/10/2026). Los nombres elegidos son los de todo lo que sigue —el `--xlsx` del paso 8 y el sello—.
 
 ```bash
 python "<PLUGIN>\skills\cuestionario-cuentas-anuales\scripts\generar_xlsx.py" \
@@ -314,6 +397,8 @@ python "<PLUGIN>\skills\cuestionario-cuentas-anuales\scripts\generar_papel.py" \
     --respuestas "<TRABAJO>/respuestas.json" \
     --generado "<AAAA-MM-DD>" \
     --cliente "<razón social>" --cierre "<fecha de cierre>" \
+    --xlsx "<el Excel que acaba de escribir el paso 7>" \
+    --pdf "<el PDF confirmado en el paso 3, con su ruta en el equipo del auditor>" \
     --salida "<expediente>/AsistenteIA/CuestionarioCuentasAnuales/revision_memoria_<CLIENTE>_<EJERCICIO>.docx"
 ```
 
@@ -324,7 +409,51 @@ trabajo tiene que poder regenerarse idéntico dentro de dos años.
 omites, la cabecera del papel sale en blanco: antes se leían del API y, cuando el API no
 respondía, quedaba vacía sin decir nada. Ahora al menos el hueco se ve en el comando.
 
+**El papel termina con el apartado «Utilización de herramientas de inteligencia artificial»**,
+con una marca en la ficha de cabecera: la evidencia de que las respuestas se propusieron con una
+herramienta de IA, de qué se le facilitó y de cómo debe verificarse. Dice que las respuestas, sus
+motivos y las referencias a la memoria los ha redactado la herramienta, y que las mismas
+respuestas van en el Excel de importación. **El apartado va solo en el Word**: el Excel no se
+toca, porque lo lee el importador de Gesia y una hoja de más podría romper la importación.
+
+- **`--xlsx`** es el Excel del paso 7: el script lo coteja con sus propias respuestas —una sola
+  hoja, las columnas del expediente sin cambios y la misma `Respuesta` en cada pregunta— y deja
+  el resultado entre sus comprobaciones. Sin él, el papel dice que no se ha cotejado.
+- **`--pdf`** es obligatorio: el PDF de las cuentas anuales que confirmó el usuario en el paso
+  3, con su ruta en el equipo del auditor (si lo subió a la conversación, su nombre). Sale tal
+  cual en la ficha de cabecera, junto a la línea que dice cómo se numeran las páginas citadas,
+  y sin él el script para con salida `2`. El MCP no lo ve, así que el apartado de uso de IA lo
+  declara además como información facilitada en claro.
+
+Las comprobaciones de la herramienta se calculan sobre lo que lleva el papel y, si algo no
+cuadra —un «Sí» sin evidencia, una pregunta sin respuesta, un Excel que dice otra cosa—, lo
+dicen con «ATENCIÓN» y el script lo imprime: corrígelo y vuelve a generar. Los apartados de la
+herramienta quedan con huecos que se rellenan al archivar (paso 9); los de verificación,
+verificado por, efecto en la conclusión y revisión **son del equipo y salen en blanco**. No
+escribas nada en ellos ni propongas texto para ellos.
+
 ### Paso 9 — Entregar
+
+**Con el papel de trabajo ya en el disco del auditor**, en
+`<expediente>\AsistenteIA\CuestionarioCuentasAnuales\`, sella el Word:
+
+```
+sellar_uso_ia(ruta = "<expediente>/AsistenteIA/CuestionarioCuentasAnuales/<papel>.docx",
+              modelo = "<el modelo con el que trabajas>",
+              procedimiento = "cuestionario-cuentas-anuales")
+```
+
+Rellena en el apartado de uso de IA lo que solo sabe la aplicación: herramienta y versiones,
+quién lo ejecutó, dónde corrieron los scripts y **qué información se facilitó y cómo**, según
+lo que el MCP ha servido desde el paso 1. `procedimiento` es el mismo perfil del paso 1, y es
+lo que le dice al MCP de qué procedimiento tiene que listar lo facilitado. En `modelo` pon el
+nombre y la versión que te da tu propio contexto; si no lo sabes, déjalo vacío. **Solo sobre el
+Word**: el Excel de importación no lleva el apartado y no se sella. **Sin esta llamada el papel
+queda con huecos que dicen «pendiente»**: no se da por entregado.
+
+**Si en algún momento el MCP avisó de otra conversación con otro expediente o perfil en el
+mismo servidor** (paso 1) y el auditor decidió seguir, recuérdaselo al entregar: es lo primero
+que tiene que mirar si el apartado de uso de IA lista algo que este procedimiento no usó.
 
 Di la ruta completa de los dos ficheros —siempre
 `<expediente>\AsistenteIA\CuestionarioCuentasAnuales\`— y **cuántas preguntas
@@ -333,14 +462,20 @@ quedaron en `2` y en `4`**, que es el trabajo que le queda al auditor. Recuérda
 - el Excel se importa **desde Gesia**, y conviene revisarlo antes. El formato está
   comprobado contra el importador real (22/08/2026), así que si algo falla al importar es
   el contenido, no la estructura;
-- las respuestas son una propuesta, y la revisión y la firma son suyas.
+- las respuestas son una propuesta, y la revisión y la firma son suyas;
+- el apartado de uso de IA del papel deja la verificación, quién la hace, su efecto en la
+  conclusión y la revisión en blanco para el equipo: mientras lo estén, el papel no es
+  evidencia de auditoría.
 
 **Los temporales.** Los volcados de `exportar_consulta` los borra
-`limpiar_exportaciones()`, y esa es la vía: funciona igual en local y en Cowork
-—lo borra el MCP, que corre en la máquina del usuario— y borra lo que él escribió
-sin que haya que decirle cuál. Si alguno no se deja, lo dice con su ruta.
+`limpiar_exportaciones(procedimiento = "cuestionario-cuentas-anuales")`, y esa es la vía:
+funciona igual en local y en Cowork —lo borra el MCP, que corre en la máquina del usuario— y
+borra lo que él escribió sin que haya que decirle cuál. **Con `procedimiento` borra solo lo de
+este procedimiento**: lo que haya exportado otra conversación con el mismo servidor se queda
+donde está. Si alguno no se deja, lo dice con su ruta.
 
-El directorio de trabajo va aparte:
+El directorio de trabajo va aparte, **borrado desde fuera** —sin haber hecho `cd` a él: si lo
+hiciste, sal antes—:
 
 ```bash
 rm -rf "<TRABAJO>"
@@ -365,3 +500,17 @@ archivo del encargo. El papel de trabajo ya lo recoge, pero tenlo presente al ex
   respondida «no aplica» sobre un epígrafe con saldo no se detecta hoy.
 - **No cuadra el balance ni la PyG** contra el PDF.
 - **No cubre los demás cuestionarios `CCC`** (continuidad, independencia, control interno).
+- **No verifica su propio resultado por el equipo.** Propone qué contrastar; la verificación,
+  quién la hace y su efecto en la conclusión los escribe el equipo en el apartado de uso de IA.
+
+## Degradación
+
+| Situación | Qué sale |
+|---|---|
+| `configurar` dice que el servidor API no responde | `arrancar_api` y se repite; solo si eso falla, se le dice al auditor |
+| El MCP avisa de otra conversación con otro expediente o perfil en el mismo servidor | se le dice al auditor tal cual y **no se sigue hasta que confirme** |
+| El usuario no ha dicho qué PDF leer, o hay varias copias | se le pregunta, con la lista de copias (nombre, carpeta, tamaño, fecha); no se elige por él |
+| La razón social no sale en el texto extraído del PDF | se mira en la imagen de la portada y las cabeceras (suele ser un logotipo); solo si tampoco está ahí, se pregunta |
+| No sale ningún `CodigoGuia` para la referencia | **para**: el cuestionario no tiene contenido en el expediente |
+| `sellar_uso_ia` dice que no hay huecos | el papel ya estaba sellado o no es el que escribió el script: no lo repitas, dilo |
+| `sellar_uso_ia` dice que no tiene constancia de lo facilitado | o no se sirvió nada por el plugin, o el MCP se reinició a mitad: el papel lo dice y remite a `RegistroEmision.jsonl`; cuéntaselo al auditor tal cual |

@@ -1,7 +1,7 @@
 """Compara la apertura del diario con el cierre auditado del ejercicio anterior.
 
-    python comparar.py --diario diario.mdb --cierre cierre.json \
-        --salida resultado.json
+    python comparar.py --filtro filtro.json --apertura apertura.json \
+        --cierre cierre.json --salida resultado.json
 
 El modelo no lee filas del diario: las lee este script y devuelve el resultado
 ya agregado al nivel de auditoria: el modelo no cuenta filas de un diario,
@@ -15,13 +15,14 @@ import json
 import sys
 from pathlib import Path
 
-from lib_continuidad import (
+# La carpeta del script, explicita: lanzado con `python -I` no esta en sys.path
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from lib_continuidad import (  # noqa: E402
     DECIMALES,
     GRUPOS_BALANCE,
-    aplicar_filtro,
-    cargar_diario,
+    cargar_apertura,
     leer_cierre,
-    leer_filtro_apertura,
+    leer_filtro,
     mapear_a_maximo_nivel,
     saldos_apertura,
     salida_utf8,
@@ -34,11 +35,69 @@ UMBRAL = 0.005
 
 MAX_LISTA = 15
 
+# Rotulo de las diferencias que se compensan entre si. Es una MARCA, no una
+# explicacion: siguen siendo diferencias y cuentan como tales (decidido por el
+# auditor tras el registro del 21/10/2026).
+ROTULO_COMPENSA = "posible reclasificación al abrir"
+
+
+def emparejar_compensadas(hallazgos: list) -> list:
+    """Agrupa las diferencias que se compensan: mismo importe absoluto, signo contrario.
+
+    Salio en un expediente real (registro del 21/10/2026): cuatro diferencias que eran dos
+    parejas -una 40 contra una 57, y dos 43 entre si- y que el auditor tuvo que emparejar a
+    mano. Es lo que deja una partida abierta en otra cuenta de la que se cerro.
+
+    Solo las de tipo `diferencia`: una `sin_apertura` o una `cuenta_nueva` dicen otra cosa
+    -falta la cuenta o sobra- y mezclarlas seria ya interpretar. El importe se compara al
+    centimo, que es la misma tolerancia que UMBRAL: los dos lados llegan redondeados a 2
+    decimales, asi que dos importes que difieren en un centimo no son el mismo.
+
+    La pareja solo se forma cuando es UNICA: exactamente una diferencia positiva y una
+    negativa con ese importe. Con mas de una en algun lado (dos +X y una -X, o dos y dos)
+    hay varias formas de emparejar y elegir una seria inventarla, asi que el grupo sale
+    como `ambigua`, con todas sus cuentas y sin pareja asignada.
+
+    Anota en cada hallazgo afectado `compensacion` (pareja | ambigua), `compensa_con` (las
+    cuentas de signo contrario) y `compite_con` (las de su mismo signo e importe, vacio en una
+    pareja), y devuelve la lista de grupos para el resumen.
+    """
+    por_importe: dict = {}
+    for h in hallazgos:
+        if h["tipo"] != "diferencia":
+            continue
+        centimos = int(round(abs(h["importe"]) * 100))
+        if centimos:
+            por_importe.setdefault(centimos, []).append(h)
+
+    grupos: list = []
+    for centimos in sorted(por_importe, reverse=True):
+        de_ese = por_importe[centimos]
+        positivas = sorted((h for h in de_ese if h["importe"] > 0), key=lambda h: h["cuenta"])
+        negativas = sorted((h for h in de_ese if h["importe"] < 0), key=lambda h: h["cuenta"])
+        if not positivas or not negativas:
+            continue
+        clase = "pareja" if len(positivas) == 1 and len(negativas) == 1 else "ambigua"
+        for lado, contrario in ((positivas, negativas), (negativas, positivas)):
+            for h in lado:
+                h["compensacion"] = clase
+                h["compensa_con"] = [c["cuenta"] for c in contrario]
+                # en la ambigua, las de su mismo signo: son las que se disputan la pareja
+                h["compite_con"] = [c["cuenta"] for c in lado if c is not h]
+        grupos.append({
+            "clase": clase,
+            "importe": round(centimos / 100, DECIMALES),
+            "positivas": [h["cuenta"] for h in positivas],
+            "negativas": [h["cuenta"] for h in negativas],
+        })
+    return grupos
+
 
 def main() -> int:
     salida_utf8()
     p = argparse.ArgumentParser()
-    p.add_argument("--diario", required=True)
+    p.add_argument("--filtro", required=True, help="JSON exportado con SQL_FILTRO")
+    p.add_argument("--apertura", required=True, help="JSON del asiento de apertura")
     p.add_argument("--cierre", required=True)
     p.add_argument("--salida", required=True)
     p.add_argument("--ejercicio", default="",
@@ -48,13 +107,13 @@ def main() -> int:
     p.add_argument("--cliente", default="", help="razón social, para el papel")
     args = p.parse_args()
 
-    filtro = leer_filtro_apertura(args.diario)
+    filtro = leer_filtro(args.filtro)
     if filtro.get("ausente"):
         print("No se puede identificar la apertura: " + filtro["motivo"])
         return 2
 
-    df = cargar_diario(args.diario)
-    mascara = aplicar_filtro(df, filtro)
+    df = cargar_apertura(args.apertura)
+    mascara = df["POR_FILTRO"]
     if not mascara.any():
         print("El filtro de apertura no selecciona ningun apunte.")
         return 2
@@ -148,6 +207,8 @@ def main() -> int:
                 "que_pasa": "la apertura no coincide con el cierre auditado",
             })
 
+    compensaciones = emparejar_compensadas(hallazgos)
+
     # Cuadre de control. El asiento de apertura cuadra a cero por construccion, y
     # la parte que entra en la prueba es solo la de balance. Asi que si la
     # apertura de balance NO suma cero, lo que falta es exactamente lo que se ha
@@ -188,10 +249,14 @@ def main() -> int:
             "suma_cierre": round(sum(saldo_cierre.values()), DECIMALES),
             "suma_apertura": suma_apertura,
             "umbral": UMBRAL,
+            "parejas_compensadas": sum(1 for g in compensaciones if g["clase"] == "pareja"),
+            "grupos_compensacion_ambigua": sum(1 for g in compensaciones
+                                               if g["clase"] == "ambigua"),
         },
         "cuadre": cuadre,
         "filas": filas,
         "hallazgos": hallazgos,
+        "compensaciones": compensaciones,
         "sin_mapeo": sin_mapeo,
         "resultados_en_apertura": resultados,
     }
@@ -234,10 +299,34 @@ def main() -> int:
         if de_ese:
             print("    " + tipo + ": " + str(len(de_ese)))
             for h in de_ese[:MAX_LISTA]:
+                marca = ""
+                if h.get("compensacion") == "pareja":
+                    marca = "  [se compensa con " + h["compensa_con"][0] + "]"
+                elif h.get("compensacion") == "ambigua":
+                    marca = ("  [ambigua: con " + " o ".join(h["compensa_con"])
+                             + (", igual que " + ", ".join(h["compite_con"])
+                                if h["compite_con"] else "") + "]")
                 print("      " + h["cuenta"] + " " + format(h["importe"], ".2f")
-                      + "  " + h["nombre"][:40])
+                      + "  " + h["nombre"][:40] + marca)
             if len(de_ese) > MAX_LISTA:
                 print("      (" + str(len(de_ese) - MAX_LISTA) + " mas en el JSON)")
+    # Las que se compensan, aparte y enteras: el auditor las emparejaba a mano
+    # (registro del 21/10/2026). Se dicen como marca, no como explicacion.
+    if compensaciones:
+        print("  COMPENSAN  " + str(m["parejas_compensadas"]) + " pareja(s) y "
+              + str(m["grupos_compensacion_ambigua"]) + " grupo(s) ambiguo(s) de "
+              "diferencias de igual importe y signo contrario: " + ROTULO_COMPENSA
+              + ". Siguen siendo diferencias.")
+        for g in compensaciones[:MAX_LISTA]:
+            lados = (", ".join(g["positivas"]) + " (+) / " + ", ".join(g["negativas"])
+                     + " (-)")
+            if g["clase"] == "pareja":
+                print("      pareja   " + format(g["importe"], ".2f") + "  " + lados)
+            else:
+                print("      AMBIGUA  " + format(g["importe"], ".2f") + "  " + lados
+                      + "  -> no se sabe cual con cual: no se emparejan")
+        if len(compensaciones) > MAX_LISTA:
+            print("      (" + str(len(compensaciones) - MAX_LISTA) + " mas en el JSON)")
     if resultados:
         print("  ATENCION: " + str(len(resultados)) + " cuentas de los grupos 6 y 7 "
               "con saldo de apertura (fuera de la prueba)")

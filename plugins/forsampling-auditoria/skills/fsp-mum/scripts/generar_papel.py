@@ -5,7 +5,13 @@
         --salida "<expediente>/AsistenteIA/FspMum/MUM <PRUEBA> <CLIENTE> <EJERCICIO>.xlsx" \
         --generado 2026-09-03
 
-Una sola hoja, «Analisis muestra»: una fila por elemento seleccionado, con las
+Dos hojas. La primera, «Uso de IA», es la evidencia del uso de inteligencia
+artificial (lib_uso_ia.py, la misma en todos los skills): que hizo la herramienta,
+que se le facilito, que comprobo ella misma y que debe verificar el equipo, con lo
+del equipo EN BLANCO. Los huecos de la aplicacion los rellena sellar_uso_ia del MCP
+sobre el papel ya archivado.
+
+La segunda, «Analisis muestra»: una fila por elemento seleccionado, con las
 columnas repartidas en cuatro ZONAS de color, cada una con su banda de titulo:
 
   A · Datos de la muestra   lo que ForSampling tiene guardado del elemento
@@ -83,6 +89,9 @@ from openpyxl.utils import get_column_letter
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from lib_fsp import (  # noqa: E402
+    es_alias,
+    nombres_locales,
+    rehidratar_local,
     rutas_documentos,
     TOL_IMPORTE,
     cargar_evaluacion,
@@ -98,12 +107,14 @@ from lib_fsp import (  # noqa: E402
 )
 from lib_mum import (  # noqa: E402
     NOMBRE_TERMINO,
+    TERMINOS,
     comparar_con_auditor_mum,
     evaluar_mum,
     observacion_mum,
     recuento,
     termino_mayoritario,
 )
+from lib_uso_ia import hoja_uso_ia, marcar_papel  # noqa: E402
 
 FONT = "Arial"
 FORMATO_EURO = '#,##0.00 "€";-#,##0.00 "€";"-"'
@@ -129,6 +140,18 @@ ZONAS_DEF = {
 COL_DOCUMENTO = ["Fichero", "Nº factura", "Fecha doc.", "CIF", "Proveedor o cliente", "Concepto",
                  "Base", "IVA", "IRPF", "Total"]
 COL_CRUCE = ["Casa por", "Días libros–doc."]
+
+# Lo que el equipo deberia contrastar. Describe, no dictamina: el alcance es suyo. El hueco
+# {termino} lleva el termino deducido, o la frase de que la muestra no lo fija.
+PROPUESTA = (
+    "Cotejar con el documento original los elementos con diferencia y una selección de los que no "
+    "la tienen: que el documento es el del apunte y que el importe transcrito es el que figura en "
+    "él. En los elementos sin medir, obtener el documento o el motivo. {termino}"
+)
+PROPUESTA_TERMINO = ("Confirmar que el término de comparación tomado ({nombre}) es el criterio con "
+                     "el que la entidad contabiliza esta población.")
+PROPUESTA_SIN_TERMINO = ("Fijar el término de comparación (base, total o neto), que la muestra no "
+                         "ha permitido deducir.")
 
 _BORDE_LADO = Side(style="thin", color="BFBFBF")
 BORDE = Border(left=_BORDE_LADO, right=_BORDE_LADO, top=_BORDE_LADO, bottom=_BORDE_LADO)
@@ -168,6 +191,11 @@ def _eur(v: float | None) -> str:
     return f"{v:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
+def _dia(v) -> str:
+    d = parse_fecha(v)
+    return d.strftime("%d/%m/%Y") if d else (str(v) if v else "—")
+
+
 def _hoja(wb: Workbook, evaluados: list[dict], cols: dict, params: dict, generado: str,
           rutas: dict[str, str] | None = None) -> None:
     """La unica hoja: un elemento por fila, en cuatro zonas de color.
@@ -188,10 +216,6 @@ def _hoja(wb: Workbook, evaluados: list[dict], cols: dict, params: dict, generad
 
     pr = params.get("parametros") or {}
     et = parse_importe(pr.get("ErrorTolerableValor"))
-
-    def _dia(v):
-        d = parse_fecha(v)
-        return d.strftime("%d/%m/%Y") if d else (str(v) if v else "—")
 
     col_pob = [c for c in evaluados[0]["fila"].keys() if c.lower() not in ("seleccionado",)]
     col_principal = cols.get("importe")
@@ -236,7 +260,8 @@ def _hoja(wb: Workbook, evaluados: list[dict], cols: dict, params: dict, generad
     ws["A4"] = ("Error = campo principal − valor según auditoría, como lo define ForSampling: positivo es de "
                 "más en libros. Amarillo: hay diferencia, o el elemento no se ha podido medir. Este papel NO "
                 "proyecta el error a la población, no lo compara con el error tolerable y no suma los errores "
-                "entre sí: eso lo hace ForSampling, y los errores por exceso y por defecto no se cancelan.")
+                "entre sí: eso lo hace ForSampling, y los errores por exceso y por defecto no se cancelan."
+                + _frase_dudosas(evaluados, cols))
     ws["A4"].font = Font(name=FONT, italic=True, size=9, color="595959")
 
     _bandas(ws, 6, [(ZONAS_DEF["muestra"][0], ZONAS_DEF["muestra"][1], 1, n_pob),
@@ -342,6 +367,180 @@ def _hoja(wb: Workbook, evaluados: list[dict], cols: dict, params: dict, generad
     _anchos(ws, anchos)
 
 
+def _ids_dudosas(evaluados: list[dict], cols: dict) -> list[str]:
+    return [str(e["fila"].get(cols.get("id"), "?")) for e in evaluados if e.get("dudosa")]
+
+
+def _frase_dudosas(evaluados: list[dict], cols: dict) -> str:
+    """Las asignaciones dudosas, contadas aparte: quedan sin medir porque el documento puede ser
+    otro del mismo tercero, y proponer su importe proyectaria un error ajeno (20/10/2026)."""
+    ids = _ids_dudosas(evaluados, cols)
+    if not ids:
+        return ""
+    return (f" Asignaciones dudosas, contadas aparte y sin medir: {len(ids)} ({', '.join(ids[:15])}"
+            f"{'…' if len(ids) > 15 else ''}). El documento puede ser otro del mismo tercero: se "
+            "confirma con poblacion_id antes de proponer importe.")
+
+
+def _manifiesto(ruta: str | None) -> dict | None:
+    """El manifiesto de los documentos, buscado como en rutas_documentos (tambien en facturas/)."""
+    if not ruta:
+        return None
+    pm = Path(ruta)
+    if not pm.exists() and (pm.parent / "facturas" / "manifiesto.json").exists():
+        pm = pm.parent / "facturas" / "manifiesto.json"
+    try:
+        return cargar_json(str(pm)) if pm.exists() else None
+    except (OSError, ValueError):
+        return None
+
+
+def _comprobaciones(ws, evaluados: list[dict], cruce: dict, cols: dict, comp: dict | None,
+                    r: dict, termino: str) -> list[str]:
+    """Lo que comprobo la propia herramienta, calculado sobre lo que lleva la hoja.
+
+    Cada frase tiene que ser VERDAD sobre este papel: si una comprobacion no se cumple, la
+    frase lo dice con «ATENCIÓN» en vez de afirmar lo contrario. Van en el resultado, nunca en
+    la verificacion, que es del equipo.
+    """
+    n = r["elementos"]
+    ids = [str(e["fila"].get(cols.get("id"), "?")) for e in evaluados]
+    out = []
+
+    sin_doc = [i for i, e in zip(ids, evaluados) if e["factura"] is None]
+    out.append(f"Documento localizado para los {n} elementos de la muestra." if not sin_doc else
+               f"ATENCIÓN: sin documento localizado para {len(sin_doc)} de {n} elementos "
+               f"({', '.join(sin_doc[:15])}{'…' if len(sin_doc) > 15 else ''}).")
+
+    con_doc = [e for e in evaluados if e["factura"] is not None]
+    declarados = sum(1 for e in con_doc if (e.get("criterios") or {}).get("declarado"))
+    ambiguos = [i for i, e in zip(ids, evaluados)
+                if e["factura"] is not None and (e.get("criterios") or {}).get("ambiguo")]
+    out.append(f"Vínculo entre documento y elemento: {len(con_doc) - declarados} por el cruce "
+               f"automático (número, tercero, importe o fecha) y {declarados} declarados a mano.")
+    if ambiguos:
+        out.append(f"ATENCIÓN: {len(ambiguos)} elementos asignados solo por tercero y fecha, con más "
+                   f"de un documento candidato ({', '.join(ambiguos[:15])}).")
+    dudosas = _ids_dudosas(evaluados, cols)
+    if dudosas:
+        out.append(f"ATENCIÓN: {len(dudosas)} asignación(es) dudosa(s), contadas aparte ({', '.join(dudosas[:15])}): "
+                   "solo las sostienen el tercero y la fecha, sin número que las ate, y el importe se "
+                   "aparta más de la mitad o la fecha está más lejos que la de los documentos atados por "
+                   "importe o número. Quedan sin medir, sin valor según auditoría ni error propuestos.")
+    sueltos = cruce.get("candidatos_sueltos") or []
+    if sueltos:
+        out.append(f"ATENCIÓN: {len(sueltos)} elementos sin documento con un documento sobrante del "
+                   f"mismo tercero: posible diferencia de importe, no extravío.")
+
+    votos = sum(1 for e in evaluados if (e.get("criterios") or {}).get("importe") == termino)
+    casan = sum(1 for e in evaluados if (e.get("criterios") or {}).get("importe") in TERMINOS)
+    out.append(f"Término de comparación deducido de la propia muestra, no supuesto: "
+               f"{NOMBRE_TERMINO[termino]} ({votos} de los {casan} elementos que casan con su "
+               f"documento lo hacen por ese término)." if termino else
+               "ATENCIÓN: la muestra no permite deducir un término de comparación (base, total o "
+               "neto): los elementos que no casan quedan sin importe propuesto.")
+
+    # las formulas, leidas de la hoja: una por elemento medido y ninguna en los sin medir
+    cab = {c.value: c.column for c in ws[7] if c.value} if ws.max_row >= 7 else {}
+    c_err, c_pct, c_val, c_obs = (cab.get("Error"), cab.get("% error"),
+                                  cab.get("Valor Auditoría (doc)"), cab.get("Observación propuesta"))
+    con_formula = sin_medir_bien = sin_medir = 0
+    hay_suma = False
+    for fila in ws.iter_rows(min_row=8):
+        for c in fila:
+            if isinstance(c.value, str) and c.value.startswith("=") and "SUM" in c.value.upper():
+                hay_suma = True
+    if c_err and c_pct and c_val and c_obs:
+        for f in range(8, ws.max_row + 1):
+            ve, vp = ws.cell(f, c_err).value, ws.cell(f, c_pct).value
+            if isinstance(ve, str) and ve.startswith("=IFERROR(") and isinstance(vp, str):
+                con_formula += 1
+            elif ws.cell(f, c_val).value is None:
+                sin_medir += 1
+                sin_medir_bien += 1 if (ve is None and vp is None and ws.cell(f, c_obs).value) else 0
+    if con_formula == r["medidos"] and sin_medir_bien == sin_medir == r["sin_medir"]:
+        out.append(f"Error y % de error escritos como fórmula (libros − valor según auditoría) en "
+                   f"los {con_formula} elementos medidos; los {sin_medir} sin medir quedan sin "
+                   f"fórmula y con el motivo en la observación.")
+    else:
+        out.append(f"ATENCIÓN: la hoja lleva fórmula de error en {con_formula} elementos y hay "
+                   f"{r['medidos']} medidos; {sin_medir} filas sin medir, {sin_medir_bien} con su motivo.")
+
+    out.append((f"Diferencias contadas por separado, sin netear: {r['n_exceso']} por exceso y "
+                f"{r['n_defecto']} por defecto." if r["con_error"] else
+                "Ningún elemento medido con diferencia.")
+               + (" La hoja no suma importes ni lleva fila de totales." if not hay_suma else
+                  " ATENCIÓN: la hoja lleva una fórmula de suma."))
+
+    if comp:
+        c = comp["recuento"]
+        out.append(("ATENCIÓN: " if c["skill_cero_auditor_error"] else "")
+                   + f"Frente a la evaluación ya registrada en ForSampling: coinciden "
+                   f"{c['coinciden']}; la herramienta propone 0 donde la evaluación registra error "
+                   f"en {c['skill_cero_auditor_error']}; señala diferencia donde la evaluación "
+                   f"registra 0 en {c['skill_error_auditor_cero']}; importes distintos en "
+                   f"{c['discrepan']}; sin comparar {c['sin_evaluar']}.")
+    return out
+
+
+def _uso_ia(wb: Workbook, args, params: dict, evaluados: list[dict], cruce: dict, cols: dict,
+            comp: dict | None, r: dict, n_facturas: int) -> None:
+    """La hoja de evidencia del uso de IA, la primera del libro (lib_uso_ia)."""
+    termino = termino_mayoritario(evaluados)
+    ws = wb["Análisis muestra"]
+    ejercicio = (_dia(params.get("FechaInicioAuditoria")) + " — "
+                 + _dia(params.get("FechaFinAuditoria")))
+
+    # Lo facilitado que el MCP NO ve: la lectura de las imagenes la hace la herramienta. Si las
+    # preparo el MCP, el sello ya las lista; si las renderizo el script, no pasan por el MCP.
+    adicional = [f"Las imágenes de los documentos de la muestra las lee la propia herramienta (el "
+                 f"modelo o sus agentes lectores), que transcribe lo que figura en la zona «B · "
+                 f"Datos del documento»: {n_facturas} documentos transcritos."]
+    man = _manifiesto(args.manifiesto)
+    if man and man.get("origen") == "mcp":
+        adicional.append("Las imágenes las preparó la aplicación en el equipo del auditor, "
+                         + ("tachadas antes de facilitarlas." if man.get("modo") == "tachadas"
+                            else "sin tachar."))
+    elif man:
+        adicional.append("Las imágenes las renderizó el script del procedimiento a partir de los "
+                         "PDF, sin tachar: no pasan por la aplicación y no constan en la lista "
+                         "anterior.")
+    else:
+        adicional.append("Sin manifiesto de los documentos: no consta si las imágenes las preparó la "
+                         "aplicación (entonces figuran en la lista anterior) o se leyeron sin pasar "
+                         "por ella, sin tachar.")
+
+    hoja_uso_ia(
+        wb,
+        papel=(f"Prueba MUM {params.get('Prueba') or ''} · ref. {params.get('Referencia') or '—'} · "
+               f"ejercicio {ejercicio} · Análisis muestra"),
+        procedimiento="fsp-mum",
+        descripcion=("Validación de la muestra de una prueba MUM (muestreo por unidades monetarias) de "
+                     "ForSampling contra los documentos escaneados: localiza el documento de cada "
+                     "elemento, lee el importe que sostiene y propone el valor según auditoría, el "
+                     "error y la tasa de error por elemento."),
+        alcance=(f"Prueba {params.get('Prueba') or '—'} (id {params.get('MuestraId')}), área "
+                 f"{params.get('Area') or '—'}, ejercicio {ejercicio}: los {r['elementos']} "
+                 f"elementos seleccionados ({r['repeticiones']:g} unidades de muestreo con "
+                 f"repeticiones) y {n_facturas} documentos transcritos de la carpeta indicada por "
+                 f"el auditor."),
+        resultado=(f"Este libro: hoja «Análisis muestra», {r['elementos']} elementos ({r['con_error']} "
+                   f"con diferencia, {r['sin_medir']} sin medir"
+                   + (f", de ellos {r['dudosas']} por asignación dudosa" if r.get("dudosas") else "")
+                   + f"). Redactado por la herramienta: lo "
+                   f"transcrito de cada documento y, como PROPUESTAS que el auditor adopta o cambia, "
+                   f"el valor según auditoría (SaldoAuditoria), el error y la tasa de error de cada "
+                   f"elemento, el término con el que se compara y la observación para ForSampling. "
+                   f"No proyecta el error a la población, no lo compara con el error tolerable ni "
+                   f"concluye si la prueba se supera: eso corresponde a ForSampling y al auditor."),
+        comprobaciones=_comprobaciones(ws, evaluados, cruce, cols, comp, r, termino),
+        propuesta=PROPUESTA.format(termino=PROPUESTA_TERMINO.format(nombre=NOMBRE_TERMINO[termino])
+                                   if termino else PROPUESTA_SIN_TERMINO),
+        generado=args.generado,
+        informacion_adicional=adicional,
+    )
+
+
 def main() -> int:
     salida_utf8()
     p = argparse.ArgumentParser(description=__doc__)
@@ -375,6 +574,12 @@ def main() -> int:
 
     wb = Workbook()
     _hoja(wb, evaluados, cols, params, args.generado, rutas)
+    # la marca junto al encabezado, en la fila libre antes de las bandas: que se vea al abrirlo
+    marcar_papel(wb["Análisis muestra"], "A5", "B5")
+    _uso_ia(wb, args, params, evaluados, cruce, cols, comp, r, len(facturas))
+    # con un manifiesto local (--carpeta, sin MCP) el papel recupera aqui el nombre real de cada
+    # alias; lo impreso al chat sigue por alias (registro del 21/10/2026)
+    rehidratar_local(wb, nombres_locales(_manifiesto(args.manifiesto)))
 
     salida = Path(args.salida)
     salida.parent.mkdir(parents=True, exist_ok=True)
@@ -386,11 +591,22 @@ def main() -> int:
 
     term = termino_mayoritario(evaluados)
     print(f"Papel escrito: {salida}")
+    print("  hoja «Uso de IA» con huecos de la aplicación: sellar_uso_ia sobre el papel archivado")
     if rutas:
         enlazados = [e for e in evaluados if e["factura"] and rutas.get(e["factura"].get("fichero"))]
         rotos = [e for e in enlazados if not Path(rutas[e["factura"]["fichero"]]).exists()]
         print(f"  documentos enlazados {len(enlazados)} de {r['con_documento']}")
-        if rotos:
+        # Con --carpeta-documentos la ruta la ha dado el auditor, y desde el contenedor nunca se
+        # ve: el aviso solo hacia ruido (registro del 21/10/2026). Y un vinculo por alias
+        # (<carpeta>\<alias>, MCP 1.26.0) no existe en ningun disco hasta que `rehidratar` lo
+        # cambia por el nombre real: tampoco es un vinculo roto.
+        por_alias = [e for e in enlazados
+                     if es_alias(str(rutas[e["factura"]["fichero"]]).replace("\\", "/").rsplit("/", 1)[-1])]
+        rotos = [e for e in rotos if e not in por_alias]
+        if por_alias:
+            print(f"  {len(por_alias)} vínculo(s) van por el alias del documento: los deja buenos "
+                  f"«rehidratar» en el equipo del auditor, que cambia el alias por el fichero real")
+        if rotos and not args.carpeta_documentos:
             print(f"  AVISO: {len(rotos)} vínculo(s) apuntan a rutas que este proceso no ve. Si los "
                   f"scripts corren en un contenedor es lo normal y en la máquina del auditor "
                   f"funcionarán; si no, pásale --carpeta-documentos con la ruta buena y repite")
@@ -398,7 +614,8 @@ def main() -> int:
         print("  sin hipervínculos: no se ha indicado --manifiesto ni --carpeta-documentos")
     print(f"  elementos {r['elementos']} · unidades de muestreo con repeticiones {r['repeticiones']:g}"
           f" · con documento {r['con_documento']} · sin documento {r['sin_documento']}"
-          f" · medidos {r['medidos']} · sin medir {r['sin_medir']}")
+          f" · medidos {r['medidos']} · sin medir {r['sin_medir']}"
+          f" (asignaciones dudosas {r['dudosas']})")
     print(f"  esta población contabiliza por: {NOMBRE_TERMINO.get(term, 'sin criterio claro (lo decide el auditor)')}")
     print(f"  sin diferencia {r['sin_error']} · con diferencia {r['con_error']}")
     if r["con_error"]:
@@ -406,8 +623,10 @@ def main() -> int:
               f"{_eur(r['suma_exceso'])} · {r['n_defecto']} por defecto suman {_eur(r['suma_defecto'])}")
         print("  NO son la proyección ni el error neto: la proyección la hace ForSampling con la muestra evaluada")
     for e in evaluados:
-        if e["error"] is None or abs(e["error"]) > TOL_IMPORTE:
-            ident = e["fila"].get(cols.get("id"), "?")
+        ident = e["fila"].get(cols.get("id"), "?")
+        if e.get("dudosa"):
+            print(f"  · ASIGNACIÓN DUDOSA, elemento {ident}, sin medir: {e['observacion']}")
+        elif e["error"] is None or abs(e["error"]) > TOL_IMPORTE:
             print(f"  · elemento {ident}: {e['observacion']}")
     for par in cruce.get("candidatos_sueltos") or []:
         print(f"  · POSIBLE DIFERENCIA, no extravío: el elemento {par['id']} quedó sin documento y "

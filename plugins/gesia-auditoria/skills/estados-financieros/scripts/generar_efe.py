@@ -3,11 +3,13 @@
 
     python generar_efe.py --cuadro cuadro.json --ajustes ajustes.json
         --estructura estructura.json --ejercicios ejercicios.json
-        --cliente "..." --ejercicio 2025
+        --cliente "..." --ejercicio 2025 --generado 19/10/2026
         --salida "<expediente>/AsistenteIA/EstadosFinancieros/Flujos de Efectivo <CLIENTE> <EJERCICIO>.xlsx"
 
-Cuatro hojas:
+Cinco hojas:
 
+  Uso de IA       la primera: la evidencia del uso de IA (lib_uso_ia), con lo del equipo en
+                  blanco y huecos que rellena sellar_uso_ia al archivar el papel
   FlujosEfectivo  el estado tal como Gesia lo presenta, con lo que calcula el programa y lo
                   que anaden los ajustes aprobados, linea a linea
   Ajustes         los ajustes del expediente, aprobados y no aprobados, con su descuadre
@@ -31,7 +33,8 @@ papel exista:
     variacion de la tesoreria, y esa variacion es la del epigrafe de efectivo del balance.
     Medido: 685.252,52 por los tres caminos.
 
-Como en el resto del skill, se escriben VALORES y no formulas.
+Como en el resto del skill, se escriben VALORES y no formulas. Y nada lee el reloj: la fecha
+de generacion llega con --generado (regla 4).
 """
 
 from __future__ import annotations
@@ -39,23 +42,44 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import date
+from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from lib_eeff import (
+# Los modulos de la carpeta se encuentran aunque se ejecute con `python -I`, que no pone la
+# carpeta del script en sys.path (prueba en Cowork, 20/10/2026).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib_eeff import (  # noqa: E402
+    INCOMPLETO,
+    SIN_HACER,
     TOLERANCIA,
     a_float,
     ejercicios,
     es_si,
+    etiqueta,
+    frases_comprobacion,
     hojas,
     leer_json,
+    lineas_entrega,
     redondear,
     salida_utf8,
     saldo,
     texto,
+)
+from lib_uso_ia import hoja_uso_ia, marcar_papel  # noqa: E402
+
+# La fecha de generacion, la que pasa el modelo con --generado. Se fija en main().
+GENERADO = ""
+
+# Lo que el equipo podria contrastar. Describe, no dictamina: el alcance es suyo.
+PROPUESTA = (
+    "Contrastar el estado con el de las cuentas anuales formuladas y con el expediente. Revisar "
+    "que los ajustes aprobados (hojas Ajustes y Apuntes) se sostienen en los movimientos de las "
+    "cuentas de las que salen, que no falta ninguno de importe relevante, y que la variación de "
+    "la tesorería ata con el efectivo del balance; y cualquier comprobación que no cuadre."
 )
 
 FONT = "Calibri"
@@ -105,10 +129,12 @@ def _titulo(ws, cliente: str, ejercicio: str, subtitulo: str) -> int:
     ws["A1"].font = Font(name=FONT, bold=True, size=13)
     ws["A2"] = subtitulo
     ws["A2"].font = Font(name=FONT, size=10, italic=True, color="595959")
-    ws["A3"] = ("Papel de trabajo preparado por Asistente IA el "
-                + date.today().strftime("%d/%m/%Y")
+    ws["A3"] = ("Papel de trabajo preparado por Asistente IA"
+                + (" el " + GENERADO if GENERADO else "")
                 + ". Revisión: lee el módulo EFE del expediente y lo cuadra, no calcula el estado.")
     ws["A3"].font = Font(name=FONT, size=9, color="808080")
+    # en todas las hojas, no solo en la primera: una hoja impresa suelta tambien la lleva
+    marcar_papel(ws, "A4", "B4")
     return 5
 
 
@@ -273,17 +299,22 @@ def _hoja_comprobaciones(wb: Workbook, comprobaciones: list, cliente: str, ejerc
                    "Los cuadres del papel. Si alguno falla, el estado que hay en el expediente no "
                    "se sostiene.")
     todo = all(ok is not False for _, ok, _ in comprobaciones)
+    sin_hacer = any(ok in INCOMPLETO for _, ok, _ in comprobaciones)
+    # Sin ajustes aprobados el cuadro de Gesia cuadra consigo mismo, pero el estado esta sin
+    # hacer: un «TODO CUADRA» en verde ahi se lee como hecho.
     c = ws.cell(row=fila, column=1,
-                value="TODO CUADRA" if todo else "HAY DESCUADRES: no entregar sin leerlos")
-    c.font = VERDE if todo else ROJO
+                value=("HAY DESCUADRES: no entregar sin leerlos" if not todo else
+                       "EL ESTADO DE FLUJOS ESTÁ SIN HACER: no tiene ningún ajuste aprobado. Lo "
+                       "que cuadra es el cálculo de Gesia consigo mismo" if sin_hacer else
+                       "TODO CUADRA"))
+    c.font = ROJO if not todo else (AMBAR if sin_hacer else VERDE)
     fila += 2
     _cabecera(ws, fila, ["Comprobación", "Resultado", "Detalle"], [64, 18, 62])
     fila += 1
     for t, ok, detalle in comprobaciones:
         ws.cell(row=fila, column=1, value=t).font = NORMAL
-        etiqueta = "A TENER EN CUENTA" if ok is None else ("CUADRA" if ok else "NO CUADRA")
-        r = ws.cell(row=fila, column=2, value=etiqueta)
-        r.font = AMBAR if ok is None else (VERDE if ok else ROJO)
+        r = ws.cell(row=fila, column=2, value=etiqueta(ok))
+        r.font = VERDE if ok is True else (ROJO if ok is False else AMBAR)
         d = ws.cell(row=fila, column=3, value=detalle)
         d.font = NORMAL
         d.alignment = Alignment(wrap_text=True, vertical="top")
@@ -302,7 +333,11 @@ def main() -> int:
     p.add_argument("--cliente", required=True)
     p.add_argument("--ejercicio", default="")
     p.add_argument("--salida", required=True)
+    p.add_argument("--generado", required=True,
+                   help="fecha de generacion, dd/mm/aaaa: nada aqui lee el reloj")
     a = p.parse_args()
+    global GENERADO
+    GENERADO = a.generado
 
     cuadro = leer_json(a.cuadro)
     ajustes = leer_json(a.ajustes)
@@ -335,19 +370,24 @@ def main() -> int:
     # el criterio del auditor -sin amortizaciones, sin impuesto, sin intereses-, y cuadra
     # perfectamente consigo mismo. Medido en un expediente terminado de modelo reducido: 159
     # lineas con importe, 29 plantillas en el catalogo y CERO ajustes aprobados.
+    # Va como SIN HACER, no como NO CUADRA: no es un fallo aritmetico, es trabajo por hacer.
     comprobaciones.append((
         "El estado está trabajado: tiene ajustes del auditor aprobados",
-        True if aprobados else None,
+        True if aprobados else SIN_HACER,
         f"{aprobados} ajustes aprobados" if aprobados else
-        f"NINGUNO de los {len(grupos)} del catálogo está aprobado. El cuadro tiene cifras "
+        f"NINGUNO de los {len(grupos)} ajustes del catálogo del estado de flujos está aprobado. "
+        "El cuadro tiene cifras "
         "porque Gesia calcula solo las variaciones de balance, pero sin ajustes esto no es "
         "todavía un estado de flujos: falta el criterio del auditor. Cuadra consigo mismo "
         "igualmente, así que el verde de las demás comprobaciones no dice que esté hecho"))
     comprobaciones.append((
         "Cada ajuste aprobado cuadra: sus cobros suman lo mismo que sus pagos",
         not descuadrados,
-        f"cuadran los {aprobados} ajustes aprobados" if not descuadrados
-        else f"{len(descuadrados)} descuadran: "
+        (f"cuadran los {aprobados} ajustes aprobados" if aprobados else
+         "no hay ningún ajuste aprobado, así que no hay nada que pueda descuadrar")
+        if not descuadrados
+        else f"{len(descuadrados)} ajustes aprobados del estado de flujos descuadran, sus cobros "
+             "no suman lo mismo que sus pagos: "
              + "; ".join(f"nº {n} {d} ({v:,.2f} €)" for n, d, v in descuadrados[:3])))
 
     # LA COMPROBACION QUE JUSTIFICA EL PAPEL: el cuadro suma los aprobados, y solo esos
@@ -372,14 +412,16 @@ def main() -> int:
         "Los ajustes que lleva el estado son exactamente la suma de los apuntes APROBADOS",
         not rotas,
         f"coincide en las {len(cuadro)} líneas del cuadro" if not rotas
-        else f"{len(rotas)} líneas no coinciden: "
+        else f"{len(rotas)} líneas del cuadro de flujos no coinciden con la suma de los apuntes "
+             "aprobados: "
              + "; ".join(f"{c} {d} ({v:,.2f} €)" for c, d, v in rotas[:3])))
 
     comprobaciones.append((
         "Ningún ajuste sin aprobar lleva importe que pudiera colarse",
         True if not fantasma else None,
         "ninguno" if not fantasma
-        else f"{len(fantasma)} ajuste(s) con importe y SIN aprobar, que por eso no suman: "
+        else f"{len(fantasma)} ajuste(s) del estado de flujos llevan importe y están SIN aprobar, "
+             "así que no suman en el estado: "
              + "; ".join(f"nº {n} {d} ({v:,.2f} €)" for n, d, v in fantasma[:3])
              + ". Si alguno debía entrar, lo aprueba el auditor en Gesia"))
 
@@ -390,7 +432,8 @@ def main() -> int:
     if not flujos:
         comprobaciones.append((
             "Los flujos de las actividades suman la variación de la tesorería", None,
-            "no se han encontrado líneas de actividad en este cuadro: no se ha podido comprobar"))
+            "no se ha podido comprobar que los flujos de las actividades sumen la variación de la "
+            "tesorería: no se han encontrado líneas de actividad en el cuadro"))
         suma_flujos = None
     else:
         suma_flujos = redondear(sum(_neto(f, "OrigenAjustado", "AplicacionAjustada") for f in flujos))
@@ -399,7 +442,8 @@ def main() -> int:
             "Los flujos de las actividades suman la variación de la tesorería",
             abs(d) <= TOLERANCIA,
             f"{variacion:,.2f} € por los dos caminos" if abs(d) <= TOLERANCIA
-            else f"difieren en {d:,.2f} €"))
+            else f"los flujos de las actividades ({suma_flujos:,.2f} €) y la variación de la "
+                 f"tesorería ({variacion:,.2f} €) difieren en {d:,.2f} €"))
 
     # y contra el balance, que es el cuadre de verdad
     efectivo = [f for f in hojas(estructura)
@@ -408,8 +452,9 @@ def main() -> int:
     if not efectivo or len(anios) < 2:
         comprobaciones.append((
             "La variación de la tesorería es la del efectivo en el balance", None,
-            "no se ha localizado el epígrafe de efectivo del balance, o no hay ejercicio "
-            "anterior cargado: la comprobación no se ha podido hacer"))
+            "no se ha podido comparar la variación de la tesorería del estado de flujos con la "
+            "del efectivo del balance: no se ha localizado el epígrafe de efectivo, o no hay "
+            "ejercicio anterior cargado"))
     else:
         var_balance = redondear(sum(saldo(f, 1) - saldo(f, 2) for f in efectivo))
         d = redondear(var_balance - variacion)
@@ -417,10 +462,12 @@ def main() -> int:
             "La variación de la tesorería es la del efectivo en el balance",
             abs(d) <= TOLERANCIA,
             f"{var_balance:,.2f} €, igual en el estado y en el balance" if abs(d) <= TOLERANCIA
-            else f"el estado dice {variacion:,.2f} € y el balance {var_balance:,.2f} €: "
-                 f"difieren en {d:,.2f} €"))
+            else f"la variación de la tesorería no es la del efectivo del balance: el estado de "
+                 f"flujos dice {variacion:,.2f} € y el balance {var_balance:,.2f} €, y difieren en "
+                 f"{d:,.2f} €"))
 
     _hoja_comprobaciones(wb, comprobaciones, a.cliente, ejercicio)
+    _uso_ia(wb, a, comprobaciones, ejercicio, aprobados, len(grupos))
 
     destino = os.path.abspath(a.salida)
     os.makedirs(os.path.dirname(destino), exist_ok=True)
@@ -428,24 +475,53 @@ def main() -> int:
     print(f"✔ papel escrito: {destino}")
     print(f"  hojas: {', '.join(wb.sheetnames)}")
     print(f"  ajustes: {aprobados} aprobados de {len(grupos)} en el catálogo del expediente")
+    # La linea que no puede faltar al entregar: con cero aprobados el estado NO esta hecho, y el
+    # verde de las demas comprobaciones solo dice que Gesia cuadra consigo mismo.
+    print("  estado de flujos: " + ("trabajado, con ajustes aprobados" if aprobados else
+                                    "SIN HACER: el expediente no tiene ningún ajuste aprobado"))
     if suma_flujos is not None:
         print(f"  variación de la tesorería: {variacion:,.2f}")
-    malas = [t for t, ok, _ in comprobaciones if ok is False]
-    avisos = [t for t, ok, _ in comprobaciones if ok is None]
-    if malas or avisos:
+    entrega = lineas_entrega(comprobaciones)
+    if entrega:
+        # El titulo de la comprobacion no se repite pegado al detalle: se leia al reves
+        # (25/09/2026, ver lineas_entrega en lib_eeff).
         print("\nPARA CONTAR AL ENTREGAR (tal cual, sin resumir):")
-        for t, ok, d in comprobaciones:
-            # El titulo es la AFIRMACION que se comprueba, y aqui no hay columna de semaforo
-            # que lo matice: pegarlo al detalle deja «El estado esta trabajado · NINGUNO esta
-            # aprobado», que se lee al reves y un modelo con prisa copia la primera mitad.
-            # Cuando la comprobacion no se cumple, la afirmacion no se repite (25/09/2026).
-            if ok is False:
-                print(f"  - NO CUADRA: {d}")
-            elif ok is None:
-                print(f"  - A TENER EN CUENTA: {d}")
+        for linea in entrega:
+            print(f"  - {linea}")
         return 1
     print("  todas las comprobaciones cuadran")
     return 0
+
+
+def _uso_ia(wb: Workbook, a, comprobaciones: list, ejercicio: str, aprobados: int,
+            plantillas: int) -> None:
+    """La hoja de evidencia del uso de IA, la primera del libro (lib_uso_ia).
+
+    Las comprobaciones son las de la hoja Comprobaciones, calculadas sobre lo que lleva el
+    papel. Van como resultado de la herramienta, nunca como verificacion: esa es del equipo y
+    queda en blanco. Este papel no lee el plan de cuentas, asi que no lleva nombres de terceros.
+    """
+    hojas_papel = list(wb.sheetnames)      # antes de añadir la de uso de IA
+    hoja_uso_ia(
+        wb,
+        papel=a.cliente + " · Ejercicio " + ejercicio + " · Estado de flujos de efectivo",
+        procedimiento="estados-financieros",
+        descripcion=("Revisión del estado de flujos de efectivo del módulo EFE del expediente: el "
+                     "estado tal como lo presenta Gesia, los ajustes del auditor y sus cuadres con "
+                     "el propio estado y con el efectivo del balance."),
+        alcance=("Ejercicio " + ejercicio + ". El cuadro del módulo EFE y los " + str(plantillas)
+                 + " ajustes de su catálogo, aprobados o no; solo cuentan los aprobados."),
+        resultado=("Este libro: hojas " + ", ".join(hojas_papel) + ". Ajustes aprobados: "
+                   + str(aprobados) + " de " + str(plantillas) + " en el catálogo del expediente."
+                   + ("" if aprobados else
+                      " Sin ajustes aprobados, el cuadro es el cálculo de Gesia sin el criterio "
+                      "del auditor: todavía no es un estado de flujos.")
+                   + " Las cifras son las del módulo EFE; el script no calcula el estado, lo lee y "
+                     "lo cuadra, y la herramienta no ha redactado conclusiones ni propone cifras."),
+        comprobaciones=frases_comprobacion(comprobaciones),
+        propuesta=PROPUESTA,
+        generado=a.generado,
+    )
 
 
 if __name__ == "__main__":

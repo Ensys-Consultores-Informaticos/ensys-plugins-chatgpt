@@ -111,6 +111,15 @@ limpieza diga lo que queda sin borrar» sobrevive a equivocarse de mecanismo;
 «que se apoye en el registro de emisión» no, y manda a alguien a escribir código
 que no arregla nada.
 
+**4c. Lo que se perdió no es una hipótesis.** Si la conversación **se resumió** por el camino
+—se nota porque empieza por un resumen de lo anterior en vez de por los mensajes—, de la parte
+resumida no queda la salida literal de los scripts ni los errores tal cual: queda lo que el
+resumen cuenta. Eso se dice **una vez, en la cabecera** (`Conversación:` de la plantilla), y en
+cada punto lo que falta se dice **«no consta»**. Algo que el resumen dice que pasó es
+**[OBSERVADO]** con la evidencia «según el resumen; el mensaje literal no consta»; [HIPÓTESIS]
+queda para lo que se sospecha, no para lo que pasó y no se puede citar. Mezclarlo convierte un
+hecho en una conjetura que nadie va a medir, y una laguna en algo que parece investigable.
+
 **5. «No hubo fricciones» hay que justificarlo.** Un modelo que evalúa su propio
 trabajo tiende a decir que fue bien. Si de verdad no hay nada, se dice **qué se
 ha mirado** para poder afirmarlo.
@@ -138,6 +147,12 @@ Repasa la sesión y recoge, en este orden:
 1. **Identificación.** Qué skill se ejecutó y su versión si consta; versión del
    MCP; expediente ofuscado. La versión importa más de lo que parece: el
    27/08/2026 convivían dos copias del mismo skill —una de trabajo y la publicada— y no se sabía cuál se estaba ejecutando.
+
+   **Los `SKILL.md` no llevan versión**, así que la del skill no consta y se dice así.
+   Pero **si el entorno enseña la del plugin, se pone esa y se dice de dónde sale**: la
+   descripción del plugin acaba en `(vX.Y.Z)`, y la ruta del directorio base del skill
+   o el manifiesto del plugin instalado pueden llevarla. «Plugin vX.Y.Z, según la
+   descripción del plugin» vale; un número sin fuente, no.
 2. **Qué pidió el usuario** y con cuántas vueltas se entendió. Si hubo que
    preguntarle algo que el `SKILL.md` podría haber resuelto solo, eso es una
    fricción.
@@ -172,11 +187,14 @@ desarrollador con el repositorio abierto.
 ```markdown
 ## Registro de ejecución
 
-- **Skill:** <nombre> <versión si consta>
+- **Skill:** <nombre> — <versión del plugin y de dónde sale, o «versión: no consta»>
 - **MCP:** <version_mcp>
 - **Expediente:** <Tab****.gs3>
 - **Fecha:** <dd/mm/aaaa>
 - **Entorno:** <ChatGPT Desktop | Codex>
+- **Conversación:** <completa | escrito sobre una conversación resumida: puede faltar la
+  salida literal de los scripts y de las consultas de la parte resumida; lo que falta va
+  como «no consta», no como hipótesis>
 
 ### Qué se pidió y qué salió
 <una o dos líneas: la petición, y el entregable que se produjo o por qué no>
@@ -234,10 +252,10 @@ el DISENO.md del skill: qué se cambia, dónde y por qué. Los que dependan de u
 | Situación | Qué sale |
 |---|---|
 | No se ha ejecutado ningún skill en la sesión | **para** y lo dice: no hay nada que registrar. No se inventa una ejecución |
-| La conversación viene resumida y falta detalle | sigue, y marca como hipótesis lo que no puede citar con evidencia |
+| La conversación viene resumida y falta detalle | sigue; la cabecera dice «escrito sobre una conversación resumida» y lo que se perdió va como «no consta». Lo que el resumen cuenta que pasó es [OBSERVADO] «según el resumen»; [HIPÓTESIS] solo lo que se sospecha (regla 4c) |
 | Sabes qué pasó pero no por qué | se escribe igual: `Causa (supuesta)`, y el arreglo redactado para el síntoma. No se calla la sospecha ni se disfraza de hecho |
 | La explicación exige saber cómo está hecho algo por dentro | **siempre** `Causa (supuesta)`: aquí no se ve el código, por bien que encaje la explicación |
-| No consta la versión del skill | se dice «no consta» — nunca se supone |
+| No consta la versión del skill | se dice «no consta» — nunca se supone. Si el entorno enseña la del plugin (la descripción acaba en `(vX.Y.Z)`), se pone esa y se dice de dónde sale |
 | El entorno deja marcas de tiempo | se usan: son medición, no estimación. Se dice de dónde salen |
 | El entorno no deja marcas de tiempo | el bloque dice «no se midió». **Nunca un tiempo a ojo** |
 | Solo hay una fricción, o ninguna | se entrega igual: un registro corto y honesto es el resultado correcto |

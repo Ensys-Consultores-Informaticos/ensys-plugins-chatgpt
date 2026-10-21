@@ -59,6 +59,11 @@ de punteo previo (la columna Indice que traen muchos .smn):
            Y los pagos anteriores a una factura SIN fecha de documento van a su
            propia fila, no a «con la fecha del documento».
 
+Y el papel: empieza por la hoja «Uso de IA» con los huecos que rellena
+sellar_uso_ia, los 11 apartados del equipo en blanco, comprobaciones que son
+verdad sobre lo que lleva el papel y la marca en la hoja Resumen; sin
+--generado no se escribe; y lib_uso_ia.py es identico en todos los skills.
+
 Por que hace falta: en una cuenta sin nada que cancelar, un emparejador
 roto y uno correcto pueden dar el mismo resultado (todo en INDICE 0). Que
 una cuenta salga limpia no demuestra que esto funcione; hace falta un
@@ -87,6 +92,9 @@ from lib_cancelacion import (
     cargar_extracto,
     procesar_extracto,
 )
+
+# la fecha de generacion del papel la pasa el modelo: nada lee el reloj (regla 4)
+GENERADO = "19/10/2026"
 
 
 def _df(filas, con_punteo=False, con_factura=False):
@@ -514,7 +522,7 @@ def main() -> int:
     (tmp / "e.json").write_text(fx.to_json(orient="records"), encoding="utf-8")
     ruta = tmp / "p.xlsx"
     subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "generar_papel.py"),
-                    "--entrada", str(tmp / "e.json"), "--salida", str(ruta)],
+                    "--entrada", str(tmp / "e.json"), "--salida", str(ruta), "--generado", GENERADO],
                    capture_output=True)
     if not ruta.exists():
         fallos.append("el papel no se ha podido generar sobre el fixture 9999913")
@@ -536,7 +544,7 @@ def main() -> int:
         (tmp / "e2.json").write_text(f3.to_json(orient="records"), encoding="utf-8")
         ruta2 = tmp / "p2.xlsx"
         subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "generar_papel.py"),
-                        "--entrada", str(tmp / "e2.json"), "--salida", str(ruta2)],
+                        "--entrada", str(tmp / "e2.json"), "--salida", str(ruta2), "--generado", GENERADO],
                        capture_output=True)
         if not ruta2.exists():
             fallos.append("9999915: el papel sin CONCEPTO no se ha podido generar")
@@ -589,7 +597,7 @@ def main() -> int:
                 print("OK  9999916 (derivadas): los hallazgos por fecha de documento se evaluan sin el texto del concepto")
             ruta16 = tmp / "p16.xlsx"
             subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "generar_papel.py"),
-                            "--entrada", str(tmp / "e16.json"), "--salida", str(ruta16)],
+                            "--entrada", str(tmp / "e16.json"), "--salida", str(ruta16), "--generado", GENERADO],
                            capture_output=True)
             if not ruta16.exists():
                 fallos.append("9999916: el papel con las derivadas no se ha podido generar")
@@ -683,7 +691,7 @@ def main() -> int:
         else:
             print("OK  9999919 (un solo apunte): separada de las aperturas no identificables, con su recuento y su importe")
         r19 = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "generar_papel.py"),
-                              "--entrada", str(tmp / "e19.json"), "--salida", str(tmp / "p19.xlsx")],
+                              "--entrada", str(tmp / "e19.json"), "--salida", str(tmp / "p19.xlsx"), "--generado", GENERADO],
                              capture_output=True, text=True, encoding="utf-8")
         tot = [l for l in r19.stdout.splitlines() if l.strip().startswith("TOTAL ")]
         if not tot or "3 cuenta(s)" not in tot[0] or "pendiente total" not in tot[0] or "verificacion: todas OK" not in tot[0]:
@@ -692,7 +700,7 @@ def main() -> int:
             print("OK  9999919 (stdout): linea TOTAL con el agregado, que el corte a 30 cuentas se llevaba")
         ruta18 = tmp / "p18.xlsx"
         subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "generar_papel.py"),
-                        "--entrada", str(tmp / "e18.json"), "--salida", str(ruta18)], capture_output=True)
+                        "--entrada", str(tmp / "e18.json"), "--salida", str(ruta18), "--generado", GENERADO], capture_output=True)
         if ruta18.exists():
             crit18 = " ".join(str(c.value) for row in load_workbook(ruta18)["Criterios y hallazgos"].iter_rows() for c in row if c.value)
             if "Solo con la fecha contable" not in crit18 or "por el paso que los formo" not in crit18:
@@ -701,6 +709,103 @@ def main() -> int:
                 print("OK  9999918 (papel): la hoja de criterios lleva la tercera fila y los grupos por paso")
         else:
             fallos.append("9999918: el papel no se ha podido generar")
+
+    # -- la hoja «Uso de IA» (docs/evidencia-uso-ia.md): punteo previo parcial (06),
+    # descuadrado (07) y una apertura por deduccion (13), en un solo papel. Lo del equipo
+    # sale en blanco, los huecos son los que rellena sellar_uso_ia, y las comprobaciones
+    # que el papel afirma son verdad sobre lo que lleva
+    from lib_uso_ia import EFECTO, HOJA, MARCA_PAPEL, REVISION, VERIFICACION, VERIFICADO
+
+    fia = pd.concat([FIXTURES["9999906"], FIXTURES["9999907"], FIXTURES["9999913"]], ignore_index=True)
+    fia["INDICE_PREVIO"] = fia["INDICE_PREVIO"].fillna(0).astype(int)
+    fia = fia.rename(columns={"INDICE_PREVIO": "Indice"})
+    fia["ASIENTO"] = [str(i) for i in range(1, len(fia) + 1)]
+    fia["FECHA"] = fia["FECHA"].dt.strftime("%Y-%m-%d")
+    (tmp / "eia.json").write_text(fia.to_json(orient="records"), encoding="utf-8")
+    ruta_ia = tmp / "Cancelacion Saldos 999 CLIENTE SINTETICO 2024.xlsx"
+    ria = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "ejecutar_cancelacion.py"),
+                          "--entrada", str(tmp / "eia.json"), "--salida", str(ruta_ia), "--generado", GENERADO],
+                         capture_output=True, text=True, encoding="utf-8")
+    if not ruta_ia.exists():
+        fallos.append("uso de IA: ejecutar_cancelacion.py no ha escrito el papel: " + (ria.stdout + ria.stderr)[-400:])
+    else:
+        wbia = load_workbook(ruta_ia)
+        wsia = wbia[HOJA] if HOJA in wbia.sheetnames else None
+        if wsia is None or wbia.sheetnames[0] != HOJA:
+            fallos.append("uso de IA: el papel tiene que empezar por la hoja «" + HOJA + "»: " + str(wbia.sheetnames[:3]))
+        else:
+            print("OK  uso de IA: el papel empieza por la hoja «" + HOJA + "»")
+            textos = [str(c.value) for fila in wsia.iter_rows() for c in fila if c.value is not None]
+            huecos = sorted({t.split("⟦IA:")[1].split(" ")[0] for t in textos if "⟦IA:" in t})
+            if huecos != ["aplicacion", "entorno", "informacion", "modelo", "plugin", "usuario"]:
+                fallos.append("uso de IA: los huecos de la aplicacion son otros: " + str(huecos))
+            else:
+                print("OK  uso de IA: huecos " + ", ".join(huecos))
+            # lo del equipo, en blanco: la herramienta no escribe ni una letra ahi
+            etiquetas = {e for e, _ in VERIFICACION + VERIFICADO + EFECTO + REVISION}
+            filas_eq = [f for f in range(1, wsia.max_row + 1) if wsia.cell(f, 1).value in etiquetas]
+            llenas = [wsia.cell(f, 1).value for f in filas_eq if any(wsia.cell(f, c).value for c in (2, 3, 4))]
+            if llenas or len(filas_eq) != len(VERIFICACION + VERIFICADO + EFECTO + REVISION):
+                fallos.append("uso de IA: los apartados del equipo tienen que salir en blanco: "
+                              + str(len(filas_eq)) + " filas, con texto en " + str(llenas))
+            else:
+                print("OK  uso de IA: los " + str(len(filas_eq)) + " apartados del equipo salen en blanco")
+            # las comprobaciones de la herramienta: verdad sobre este papel, ninguna ATENCION
+            comp = " ".join(textos)
+            # 06: un par previo y uno nuevo; 07: un grupo previo descuadrado; 13: la apertura
+            esperadas = ("Cuentas del extracto en el papel: 3 de 3", "apuntes: " + str(len(fia))
+                         + " de " + str(len(fia)), "suman cero al céntimo: ",
+                         "VERIFICACION de la hoja Resumen: OK en 3 de 3",
+                         "respetado: grupos que traía el diario: 2;",
+                         "Grupos del punteo previo que no suman cero: 1 de 2")
+            faltan = [e for e in esperadas if e not in comp]
+            if faltan or "ATENCIÓN" in comp:
+                fallos.append("uso de IA: las comprobaciones no dicen lo que lleva el papel; faltan "
+                              + str(faltan) + (" y hay una ATENCIÓN" if "ATENCIÓN" in comp else ""))
+            else:
+                print("OK  uso de IA: las comprobaciones son las del papel (cuentas, suma cero, "
+                      "VERIFICACION, punteo previo y su descuadre)")
+        marca = wbia["Resumen"]["B2"].value if "Resumen" in wbia.sheetnames else None
+        if marca != MARCA_PAPEL:
+            fallos.append("uso de IA: la hoja Resumen tiene que llevar la marca en B2: " + repr(marca))
+        else:
+            print("OK  uso de IA: la hoja Resumen lleva la marca «pendiente de verificacion»")
+    # y si algo falla, la comprobacion lo dice con ATENCION en vez de afirmar lo que no es:
+    # un apunte nuevo que se cuela en el numero de un grupo previo, y una cuenta en REVISAR
+    import generar_papel
+
+    d06 = cargar_extracto(tmp / "eia.json")
+    d06 = d06[d06["CUENTA"] == "9999906"]
+    por06 = procesar_extracto(d06)
+    r06, _ = por06["9999906"]
+    r06.loc[(r06["ORIGEN"] != ORIGEN_CONTABLE) & (r06["INDICE"] > 0), "INDICE"] = 3
+    por06["9999906"] = (r06, verificar_cuenta(r06))
+    filas06 = [{"cuenta": "9999906", "apuntes": len(r06), "ok": False}]
+    comp06 = generar_papel._comprobaciones(d06, por06, filas06)
+    if sum(c.startswith("ATENCIÓN") for c in comp06) < 2 or any("respetado" in c for c in comp06):
+        fallos.append("uso de IA: con el punteo pisado y una cuenta en REVISAR, las comprobaciones "
+                      "tienen que decir ATENCIÓN: " + str(comp06))
+    else:
+        print("OK  uso de IA: si una comprobacion falla, el papel dice ATENCIÓN y no la da por buena")
+    # sin --generado no hay papel: la fecha no se inventa (regla 4)
+    rsin = subprocess.run([sys.executable, str(Path(__file__).resolve().parent / "generar_papel.py"),
+                           "--entrada", str(tmp / "eia.json"), "--salida", str(tmp / "sin_fecha.xlsx")],
+                          capture_output=True, text=True, encoding="utf-8")
+    if rsin.returncode == 0 or (tmp / "sin_fecha.xlsx").exists():
+        fallos.append("uso de IA: sin --generado el papel no se tiene que escribir")
+    else:
+        print("OK  uso de IA: sin --generado no se escribe el papel")
+    propia = Path(__file__).resolve().parent / "lib_uso_ia.py"
+    otras = [q for q in propia.parents[2].glob("*/scripts/lib_uso_ia.py") if q.resolve() != propia]
+    if not otras or not all(q.read_bytes() == propia.read_bytes() for q in otras):
+        fallos.append("lib_uso_ia.py tiene que ser identico en todos los skills que lo llevan")
+    else:
+        print("OK  lib_uso_ia.py identico en los " + str(len(otras) + 1) + " skills que lo llevan")
+
+    # el directorio temporal de los papeles de prueba: se quedaba en el TEMP del sistema
+    # en cada ejecucion (nueve carpetas el 20/10/2026). Datos sinteticos, pero no se dejan
+    import shutil
+    shutil.rmtree(tmp, ignore_errors=True)
 
     # segunda puerta: los bloques de arriba (9999915 en adelante) tambien llenan `fallos`,
     # y hasta el 10/09/2026 se quedaban sin reportar porque la unica puerta iba antes

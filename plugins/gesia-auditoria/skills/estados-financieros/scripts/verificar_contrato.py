@@ -17,8 +17,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
-from lib_eeff import (
+# Los modulos de la carpeta se encuentran aunque se ejecute con `python -I`, que no pone la
+# carpeta del script en sys.path (prueba en Cowork, 20/10/2026).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib_eeff import (  # noqa: E402
     exigir_tokens,
     COLUMNAS_SALDO,
     DECIMALES,
@@ -49,7 +54,7 @@ def main() -> int:
     p.add_argument("--cuentas", required=True, help="JSON del plan con su epigrafe y saldos")
     p.add_argument("--ejercicios", required=True, help="JSON de Auditorias: codigo y año")
     p.add_argument("--nombres-en-claro", action="store_true",
-                   help="solo si el auditor ha apagado la tokenizacion: configurar dice «forzado por el auditor»")
+                   help="solo si el auditor ha apagado la seudonimizacion: configurar dice «forzado por el auditor»")
     a = p.parse_args()
 
     errores: list = []

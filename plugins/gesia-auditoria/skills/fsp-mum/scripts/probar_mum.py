@@ -423,6 +423,63 @@ def main() -> int:
         ok((_fl - _fd).days == e1["criterios"]["dias"],
            "y la resta de las celdas da lo MISMO que el cruce en Python: el papel no se desvia")
 
+        # -- el papel entero, por su main, con el bloque de uso de IA (lib_uso_ia)
+        import os as _os
+        import subprocess as _sp
+        from openpyxl import load_workbook as _lw
+        from lib_uso_ia import EFECTO, HOJA, REVISION, VERIFICACION, VERIFICADO
+        _tu = _P(_tf.mkdtemp())
+        (_tu / "muestra.json").write_text(_json.dumps(MUESTRA), encoding="utf-8")
+        (_tu / "facturas.json").write_text(_json.dumps({"facturas": FACTURAS}), encoding="utf-8")
+        (_tu / "parametros.json").write_text(_json.dumps(_params), encoding="utf-8")
+        (_tu / "evaluacion.json").write_text(_json.dumps(EVALUACION_AUDITOR), encoding="utf-8")
+        _papel = _tu / "papel.xlsx"
+        _res = _sp.run([sys.executable, str(Path(__file__).resolve().parent / "generar_papel.py"),
+                        "--muestra", str(_tu / "muestra.json"), "--facturas", str(_tu / "facturas.json"),
+                        "--parametros", str(_tu / "parametros.json"),
+                        "--evaluacion", str(_tu / "evaluacion.json"),
+                        "--salida", str(_papel), "--generado", "2026-10-19"],
+                       capture_output=True, text=True, encoding="utf-8",
+                       env={**_os.environ, "PYTHONIOENCODING": "utf-8"})
+        ok(_res.returncode == 0 and _papel.exists(),
+           "generar_papel escribe el papel entero" + ("" if _res.returncode == 0 else ": " + _res.stderr[-300:]))
+        if _papel.exists():
+            _wbu = _lw(_papel)
+            _wu = _wbu[HOJA] if HOJA in _wbu.sheetnames else None
+            ok(_wu is not None and _wbu.sheetnames[0] == HOJA,
+               "el papel lleva la hoja «" + HOJA + "», la primera")
+            if _wu is not None:
+                _txt = [str(c.value) for f in _wu.iter_rows() for c in f if c.value is not None]
+                _huecos = sorted({t.split("⟦IA:")[1].split(" ")[0] for t in _txt if "⟦IA:" in t})
+                ok(_huecos == ["aplicacion", "entorno", "informacion", "modelo", "plugin", "usuario"],
+                   "con los huecos que rellena la aplicacion: " + ", ".join(_huecos))
+                _etq = {e for e, _ in VERIFICACION + VERIFICADO + EFECTO + REVISION}
+                _filas_eq = [f for f in range(1, _wu.max_row + 1) if _wu.cell(f, 1).value in _etq]
+                _llenas = [f for f in _filas_eq if any(_wu.cell(f, c).value for c in (2, 3, 4))]
+                ok(not _llenas and len(_filas_eq) == len(VERIFICACION + VERIFICADO + EFECTO + REVISION),
+                   "los " + str(len(_filas_eq)) + " apartados del equipo salen en blanco")
+                # las comprobaciones dicen la verdad del papel: el fixture tiene dos elementos sin
+                # documento y uno en que la herramienta da 0 y el auditor puso error
+                _loc = next((t for t in _txt if "documento localizado" in t), "")
+                ok(_loc.startswith("· ATENCIÓN") and "2 de 10" in _loc,
+                   "la comprobacion de documentos dice ATENCIÓN con los dos sin documento, no que esten todos")
+                ok(any(t.startswith("· ATENCIÓN: Frente a la evaluación") for t in _txt)
+                   and any("la base imponible" in t and t.startswith("· Término") for t in _txt),
+                   "y la de la evaluacion avisa del 0 frente a error; el termino deducido es la base")
+                ok(any("PROPUESTAS" in t and "No proyecta" in t for t in _txt),
+                   "el resultado dice que las tres columnas son propuestas y que no proyecta ni concluye")
+            ok("Pendiente de verificación" in str(_wbu["Análisis muestra"]["B5"].value or ""),
+               "y la hoja de la muestra dice que esta pendiente de verificacion")
+
+    # -- la libreria del bloque de uso de IA es la misma en todos los skills que la llevan
+    _propia_ia = Path(__file__).resolve().parent / "lib_uso_ia.py"
+    _otras_ia = [p for p in _propia_ia.parents[2].glob("*/scripts/lib_uso_ia.py") if p.resolve() != _propia_ia]
+    if _otras_ia:
+        ok(all(p.read_bytes() == _propia_ia.read_bytes() for p in _otras_ia),
+           "lib_uso_ia.py es identico en los " + str(len(_otras_ia) + 1) + " skills que lo llevan")
+    else:
+        print("-      lib_uso_ia.py: sin otras copias al lado, no se comprueba la deriva (normal ya instalado)")
+
     # -- el tercero llega tokenizado por el MCP (perfil fsp-mum): PROV/CLI + cuenta, o TER h...
     import lib_fsp as _lf
     ok(_lf._tokens_tercero("PROV 40000012") == set() and _lf._tokens_tercero("TER h3f9a2c") == set()
@@ -462,9 +519,236 @@ def main() -> int:
         ok(h1 == h2, "lib_fsp.py es byte a byte el mismo que en fsp-cumplimiento (una sola fuente del cruce)")
     else:
         print("-      lib_fsp.py: sin la copia hermana al lado, no se comprueba la deriva (normal ya instalado)")
+    hermana_pd = Path(__file__).resolve().parents[2] / "fsp-cumplimiento" / "scripts" / "preparar_documentos.py"
+    if hermana_pd.exists():
+        ok((Path(__file__).resolve().parent / "preparar_documentos.py").read_bytes() == hermana_pd.read_bytes(),
+           "preparar_documentos.py es byte a byte el mismo que en fsp-cumplimiento (aparta e inventaría igual)")
+
+    # -- C7 (20/10/2026): la regla de apartado del MCP 1.25.1, y las imagenes sueltas
+    from pathlib import PurePath as _PP
+    _fac, _ap = _pd.clasificar([_PP(n) for n in ("JUSTIFICANTE REMESA 03.pdf", "ALBARAN 1234.pdf",
+                                                   "4 - ALBARAN 77.pdf", "Z FRA 1.pdf")])
+    ok(sorted(x.name for x in _ap) == ["ALBARAN 1234.pdf", "JUSTIFICANTE REMESA 03.pdf"]
+       and "4 - ALBARAN 77.pdf" in [x.name for x in _fac],
+       "C7: se aparta lo marcado sin prefijo numérico (albarán incluido); el único de su elemento numerado, no")
+    _fac2, _ = _pd.clasificar([_PP("ALBARAN 1234.pdf")], {"ALBARAN 1234.pdf"})
+    ok([x.name for x in _fac2] == ["ALBARAN 1234.pdf"], "C7: y lo pedido con --incluir se recupera")
+    ok(_pd._paginas_de(Path("x.jfif")) == 1 and _pd._es_imagen(Path("a.TIF")) and not _pd._es_imagen(Path("a.pdf")),
+       "C7: una imagen suelta (JFIF, TIF…) es un documento de una página")
+
+    # -- asignacion dudosa (20/10/2026): en una MUM queda SIN MEDIR y contada aparte. D1 y D2 casan
+    # por la base (fijan el termino y la linea base de fechas); D3 es el caso del registro -otra
+    # factura del mismo tercero, sin numero, 900 frente a 3.000 y 30 dias antes-; D4 es una
+    # diferencia real del mismo dia (9 %), que SI se mide.
+    import json as _jd
+    import os as _osd
+    import subprocess as _spd
+    import tempfile as _tfd
+    from openpyxl import load_workbook as _lwd
+    _md = [
+        {"GA1Poblacion_ID": "31", "Repeticiones": "1", "Fecha": "15/03/25 0:00:00", "Acreedor": "OMEGA", "Saldo": "1000"},
+        {"GA1Poblacion_ID": "32", "Repeticiones": "1", "Fecha": "02/04/25 0:00:00", "Acreedor": "KAPPA", "Saldo": "500"},
+        {"GA1Poblacion_ID": "33", "Repeticiones": "1", "Fecha": "20/06/25 0:00:00", "Acreedor": "LAMBDA", "Saldo": "3000"},
+        {"GA1Poblacion_ID": "34", "Repeticiones": "1", "Fecha": "10/07/25 0:00:00", "Acreedor": "MURCIA", "Saldo": "1100"},
+    ]
+    _fd_ = [
+        {"fichero": "31 - OMEGA.pdf", "proveedor": "OMEGA", "numero": "O-1", "fecha": "14/03/2025",
+         "base": "1000,00", "iva": "210,00", "total": "1210,00"},
+        {"fichero": "32 - KAPPA.pdf", "proveedor": "KAPPA", "numero": "K-1", "fecha": "02/04/2025",
+         "base": "500,00", "iva": "105,00", "total": "605,00"},
+        {"fichero": "LAMBDA otra.pdf", "proveedor": "LAMBDA", "numero": "", "fecha": "21/05/2025",
+         "base": "900,00", "iva": "189,00", "total": "1089,00"},
+        {"fichero": "34 - MURCIA.pdf", "proveedor": "MURCIA", "numero": "", "fecha": "10/07/2025",
+         "base": "1000,00", "iva": "210,00", "total": "1210,00"},
+    ]
+    _cd = columnas_de_muestra(_md)[0]
+    _ed = {e["fila"]["GA1Poblacion_ID"]: e for e in evaluar_mum(cruzar(_md, _fd_, _cd), _cd)}
+    for _e in _ed.values():
+        _e["observacion"] = observacion_mum(_e)
+    _e33 = _ed["33"]
+    ok(_e33["dudosa"] and _e33["saldo_auditoria"] is None and _e33["error"] is None and _e33["tasa"] is None,
+       "MUM D3: la asignación dudosa NO propone valor según auditoría ni error: queda sin medir")
+    ok("asignación dudosa" in _e33["observacion"] and "poblacion_id" in _e33["observacion"]
+       and "64 % distinto" in _e33["observacion"] and "30 días antes" in _e33["observacion"],
+       "MUM D3: la observación dice el motivo y cómo confirmarlo (poblacion_id)")
+    ok(not _ed["34"]["dudosa"] and _ed["34"]["error"] == 100.0,
+       "MUM D4: una diferencia real del 9 % del mismo día se mide: error 100,00")
+    _rd = recuento(list(_ed.values()))
+    ok(_rd["dudosas"] == 1 and _rd["sin_medir"] == 1 and _rd["medidos"] == 3,
+       "MUM: el recuento cuenta la dudosa aparte, dentro de los sin medir")
+    _td = Path(_tfd.mkdtemp())
+    _pd_ = {"MuestraId": 8, "Tipo": "MUM", "Prueba": "Servicios 25", "Area": "GA", "Referencia": "GA)1",
+            "FechaInicioAuditoria": "01/01/2025", "FechaFinAuditoria": "31/12/2025", "parametros": {}}
+    for _n, _v in (("muestra.json", _md), ("facturas.json", {"facturas": _fd_}), ("parametros.json", _pd_)):
+        (_td / _n).write_text(_jd.dumps(_v, ensure_ascii=False), encoding="utf-8")
+    _rr = _spd.run([sys.executable, str(Path(__file__).resolve().parent / "generar_papel.py"),
+                    "--muestra", str(_td / "muestra.json"), "--facturas", str(_td / "facturas.json"),
+                    "--parametros", str(_td / "parametros.json"), "--salida", str(_td / "p.xlsx"),
+                    "--generado", "2026-10-20"], capture_output=True, text=True, encoding="utf-8",
+                   env={**_osd.environ, "PYTHONIOENCODING": "utf-8"})
+    ok(_rr.returncode == 0 and "sin medir 1 (asignaciones dudosas 1)" in _rr.stdout
+       and "ASIGNACIÓN DUDOSA, elemento 33, sin medir" in _rr.stdout,
+       "MUM: la salida cuenta la dudosa aparte y la rotula" + ("" if _rr.returncode == 0 else ": " + _rr.stderr[-300:]))
+    if (_td / "p.xlsx").exists():
+        _wd = _lwd(_td / "p.xlsx")
+        _txt = "\n".join(str(c.value) for f in _wd[_wd.sheetnames[0]].iter_rows() for c in f if c.value is not None)
+        ok("Asignaciones dudosas, contadas aparte y sin medir: 1 (33)" in str(_wd["Análisis muestra"]["A4"].value),
+           "MUM: la cabecera de la hoja cuenta aparte la dudosa")
+        ok("ATENCIÓN: 1 asignación(es) dudosa(s), contadas aparte (33)" in _txt
+           and "1 sin medir, de ellos 1 por asignación dudosa" in _txt
+           and "los 1 sin medir quedan sin fórmula y con el motivo" in _txt,
+           "MUM: las comprobaciones del uso de IA la cuentan aparte, sin fórmula y con su motivo")
+    import shutil as _shd
+    _shd.rmtree(_td, ignore_errors=True)
+
+    # -- C1: cada script arranca con python -I desde otra carpeta (sin la suya en la ruta)
+    import subprocess as _sp
+    import tempfile as _tf
+    _fuera = _tf.mkdtemp()
+    _malos = []
+    for _s in sorted(Path(__file__).resolve().parent.glob("*.py")):
+        if _s.name.startswith("probar_"):
+            continue
+        _r = _sp.run([sys.executable, "-I", str(_s), "--help"], cwd=_fuera, capture_output=True,
+                     text=True, encoding="utf-8", errors="replace")
+        if _r.returncode != 0:
+            _malos.append(f"{_s.name}: {(_r.stderr or _r.stdout).strip().splitlines()[-1:]}")
+    ok(not _malos, "C1: todos los scripts arrancan con python -I desde otra carpeta"
+       + (" — fallan: " + "; ".join(_malos) if _malos else ""))
+    Path(_fuera).rmdir()
+
+    _probar_alias_papel(ok)
+    _probar_tercero_del_mcp(ok)
 
     print("\n" + ("RESULTADO: todo correcto" if not fallos else f"RESULTADO: {fallos} fallo(s)"))
     return 1 if fallos else 0
+
+
+
+def _probar_tercero_del_mcp(ok) -> None:
+    """A00: el cambio a la columna de tercero que eligio el MCP es informativo (registro del
+    21/10/2026), igual que en fsp-cumplimiento. Linea C02, fuera de «PARA CONTAR», y salida 0 si
+    era el unico aviso; un cambio que decide el skill, sin tokens de cuenta, sigue en A00."""
+    import contextlib as _cl
+    import io as _io
+    import json as _json
+    import shutil as _sh
+    import tempfile as _tf
+    import verificar_contrato as _vc
+    from ejecutar_mum import _para_el_usuario
+    muestra = [{"G_ID": str(i), "Fecha": f"0{i}/03/25 0:00:00", "Cuenta": "62300000",
+                "NombreCuenta": "TER h1a2b3c", "Proveedor": f"PROV 40000000{i}",
+                "Saldo": f"{i}00,00", "Factura": f"F-{i}"} for i in range(1, 6)]
+    facturas = [{"fichero": f"{i} - F-{i}.pdf", "proveedor": f"PROV 40000000{i}", "numero": f"F-{i}",
+                 "fecha": f"0{i}/03/2025", "base": f"{i}00,00", "iva": "0,00", "total": f"{i}00,00"}
+                for i in range(1, 6)]
+    params = {"MuestraId": "1", "Prueba": "Servicios", "Tipo": "MUM", "parametros": {}}
+    d = Path(_tf.mkdtemp())
+
+    def correr(filas):
+        for n, v in (("muestra.json", filas), ("facturas.json", facturas), ("parametros.json", params)):
+            (d / n).write_text(_json.dumps(v, ensure_ascii=False), encoding="utf-8")
+        sys.argv = ["verificar_contrato.py"] + [x for n in ("muestra", "parametros", "facturas")
+                                                for x in ("--" + n, str(d / f"{n}.json"))]
+        buf = _io.StringIO()
+        with _cl.redirect_stdout(buf):
+            cod = _vc.main()
+        out = buf.getvalue()
+        buf2 = _io.StringIO()
+        with _cl.redirect_stdout(buf2):
+            _para_el_usuario(out, "")
+        return cod, out, buf2.getvalue()
+
+    argv = list(sys.argv)
+    try:
+        cod, out, contar = correr(muestra)
+        ok(cod == 0 and "A00" not in out and "C02 · tercero = «Proveedor»" in out
+           and "«NombreCuenta» no sirve para cruzar el tercero: tiene un solo valor en las 5 filas" in out
+           and "NombreCuenta" not in contar,
+           "A00: el cambio a la columna del MCP sale como línea C02 con el motivo real, no como aviso ni "
+           "en «PARA CONTAR», y el contrato sale con 0")
+        en_claro = [dict(f, NombreCuenta="SERVICIOS", Proveedor=f"PROVEEDOR {f['G_ID']}") for f in muestra]
+        cod, out, contar = correr(en_claro)
+        ok(cod == 1 and "A00 · la columna de tercero pasa de «NombreCuenta» a «Proveedor»" in out
+           and "C02 · tercero =" not in out and "A00" in contar,
+           "un cambio de columna sin tokens de cuenta lo decide el skill: sigue siendo A00 y se cuenta")
+    finally:
+        sys.argv = argv
+        _sh.rmtree(d, ignore_errors=True)
+
+
+def _probar_alias_papel(ok) -> None:
+    """Los nombres de fichero no salen del equipo (registro del 21/10/2026, MCP 1.26.0).
+
+    El manifiesto del MCP trae un alias en `fichero` y ninguna `ruta`: el papel enlaza
+    <carpeta-documentos>\\<alias> (lo arregla rehidratar en el equipo del auditor), y con la carpeta
+    indicada no avisa de «rutas que este proceso no ve». Con el manifiesto local, el papel recupera
+    el nombre real. Y la lista de marcado lleva TODOS/TODAS, como la del MCP.
+    """
+    import json as _json
+    import os as _os
+    import shutil as _sh
+    import subprocess as _sp
+    import tempfile as _tf
+    from pathlib import PurePath as _PP
+    from openpyxl import load_workbook as _lw
+    import preparar_documentos as _pd
+    _fac, _ap = _pd.clasificar([_PP(n) for n in ("FACTURAS TODOS.pdf", "1 - A.pdf", "2 - B TODAS.pdf")])
+    ok([x.name for x in _ap] == ["FACTURAS TODOS.pdf"] and "2 - B TODAS.pdf" in [x.name for x in _fac],
+       "A2: el recopilatorio «… TODOS.pdf» sin prefijo se aparta; el numerado único de su elemento, no")
+    lote = "3fa2"
+    alias = {f["fichero"]: _pd.alias_doc(lote, f"f{i:02d}", f["fichero"]) for i, f in enumerate(FACTURAS, 1)}
+    t = Path(_tf.mkdtemp())
+    fac = [dict(f, fichero=alias[f["fichero"]]) for f in FACTURAS]
+    (t / "facturas").mkdir()
+    (t / "muestra.json").write_text(_json.dumps(MUESTRA), encoding="utf-8")
+    (t / "facturas.json").write_text(_json.dumps({"facturas": fac}), encoding="utf-8")
+    (t / "parametros.json").write_text(_json.dumps({"MuestraId": 5, "Tipo": "MUM", "Prueba": "Servicios 25"}),
+                                       encoding="utf-8")
+    (t / "facturas" / "manifiesto.json").write_text(_json.dumps({
+        "carpeta": "C:\\Exp\\Docs", "lote": lote, "origen": "mcp", "modo": "tachadas",
+        "documentos": [{"id": f"f{i:02d}", "fichero": a, "paginas": 1, "imagenes": [f"f{i:02d}_p1.jpg"]}
+                       for i, a in enumerate(alias.values(), 1)]}), encoding="utf-8")
+    papel = t / "papel.xlsx"
+    script = str(Path(__file__).resolve().parent / "generar_papel.py")
+    base = ["--muestra", str(t / "muestra.json"), "--facturas", str(t / "facturas.json"),
+            "--parametros", str(t / "parametros.json"), "--manifiesto", str(t / "manifiesto.json"),
+            "--salida", str(papel), "--generado", "2026-10-21"]
+    env = {**_os.environ, "PYTHONIOENCODING": "utf-8"}
+    r = _sp.run([sys.executable, script] + base + ["--carpeta-documentos", "D:\\Auditor\\Docs"],
+                capture_output=True, text=True, encoding="utf-8", env=env)
+    ok(r.returncode == 0 and "AVISO" not in r.stdout and "por el alias" in r.stdout,
+       "c): con --carpeta-documentos no sale el aviso de «rutas que este proceso no ve», y se dice que el "
+       "vínculo va por alias hasta rehidratar")
+    if papel.exists():
+        ws = _lw(papel)["Análisis muestra"]
+        cab = {c.value: c.column for c in ws[7] if c.value}
+        celda = ws.cell(8, cab["Fichero"])
+        ok(_pd.RE_ALIAS.fullmatch(str(celda.value or "")) and celda.hyperlink is not None
+           and celda.hyperlink.target == "D:\\Auditor\\Docs\\" + str(celda.value),
+           "con el manifiesto del MCP la celda lleva el alias y el vínculo es <carpeta-documentos>\\<alias>")
+    r = _sp.run([sys.executable, script] + base, capture_output=True, text=True, encoding="utf-8", env=env)
+    ok(r.returncode == 0 and "AVISO" not in r.stdout,
+       "sin --carpeta-documentos, el vínculo va a la carpeta del manifiesto y por alias tampoco es un vínculo roto")
+    # el manifiesto local (preparar_documentos.py --carpeta): el papel recupera el nombre real
+    reales = {f"f{i:02d}": f["fichero"] for i, f in enumerate(FACTURAS, 1)}
+    (t / "facturas" / "manifiesto.json").unlink()
+    (t / "manifiesto.json").write_text(_json.dumps({
+        "carpeta": str(t), "lote": lote, "origen": "local", "reales": reales, "apartados": [],
+        "documentos": [{"id": i, "fichero": alias[n], "ruta": str(t / n), "paginas": 1, "imagenes": []}
+                       for i, n in reales.items()]}), encoding="utf-8")
+    r = _sp.run([sys.executable, script] + base, capture_output=True, text=True, encoding="utf-8", env=env)
+    if papel.exists():
+        ws = _lw(papel)["Análisis muestra"]
+        cab = {c.value: c.column for c in ws[7] if c.value}
+        nombres = {ws.cell(f, cab["Fichero"]).value for f in range(8, ws.max_row + 1)
+                   if ws.cell(f, cab["Fichero"]).hyperlink is not None}
+        ok(r.returncode == 0 and nombres and nombres <= set(reales.values())
+           and not any(a in r.stdout for a in reales.values()) and "por el alias" not in r.stdout,
+           "con el manifiesto local el papel recupera el nombre real, y lo impreso sigue sin él")
+    else:
+        ok(False, "generar_papel no ha escrito el papel: " + (r.stdout + r.stderr)[-300:])
+    _sh.rmtree(t, ignore_errors=True)
 
 
 if __name__ == "__main__":

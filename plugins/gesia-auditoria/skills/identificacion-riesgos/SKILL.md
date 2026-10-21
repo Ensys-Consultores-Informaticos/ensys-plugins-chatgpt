@@ -90,7 +90,10 @@ variables de shell: en Windows el intérprete no siempre es el mismo y una varia
 funciona en una consola no existe en la otra.
 
 - `<PLUGIN>` — la raíz del plugin instalado
-- `<TRABAJO>` — una carpeta de trabajo local para esta sesión, fuera del expediente
+- `<TRABAJO>` — una carpeta de trabajo local NUEVA para esta ejecución, con el nombre del
+  procedimiento y la hora, fuera del expediente. No reutilices la de otro procedimiento ni la
+  de otra conversación: los ficheros de trabajo se pisarían. Entrega los papeles por su nombre
+  exacto, nunca con un comodín, y al terminar bórrala; si no se deja, di su ruta exacta.
 
 **ChatGPT Cowork corre en el equipo del auditor**: los scripts y el MCP comparten disco, así
 que lo que exporta el MCP lo leen los scripts directamente y el papel se escribe en la ruta
@@ -100,12 +103,40 @@ del expediente sin pasos intermedios.
 
 ## Secuencia
 
-### Paso 1 — Expediente, y preguntar el sector
+### Paso 1 — Expediente, máster y sector
 
 ```
-configurar()
+configurar(perfil = "identificacion-riesgos")
 contexto_expediente()
 ```
+
+**El perfil va lo primero**: marca el comienzo del procedimiento, y desde ahí el MCP lleva
+la cuenta de lo que se facilita a la herramienta, que es lo que el informe dirá en su apartado
+de uso de IA. Este perfil no seudonimiza nada: balance, cuenta de resultados, ratios y catálogo
+no llevan terceros.
+
+**Y `contexto_expediente()` se llama siempre después, aunque ya lo tengas de antes** en
+esta conversación: lo leído con otro perfil, o antes de este `configurar`, no consta como
+facilitado para este papel, y el apartado de uso de IA quedaría incompleto.
+
+**Si `configurar` avisa de que otra conversación trabaja con otro expediente o con otro
+perfil en el mismo servidor, para.** Díselo al auditor tal cual y no sigas hasta que te
+confirme que la otra ha terminado: comparten el MCP y se pisan —el expediente, el perfil y
+la cuenta de lo facilitado—. Cuando lo confirme, vuelve a empezar este paso.
+
+**Pide de una vez todo lo que falte**, no a medias del procedimiento: la ruta del `.gs3`
+si `configurar` no la tiene, el sector si el expediente no lo trae (abajo), y **la ruta
+del máster de riesgos**, que hace falta en el paso 3 y no se deduce del expediente. Suele
+estar en una carpeta tipo `Master Gesia <año>` y el fichero lleva `CON RIESGOS` en el
+nombre. Sin máster no hay catálogo y el skill **para**: los riesgos no se inventan.
+**Si `configurar` trae en `master_riesgos` el último máster usado en este equipo** («— sin
+indicar. El último usado en este equipo es <ruta>…»), no pidas la ruta en blanco: propónsela
+en una línea y, si la confirma, pásala en `master_file` en el paso 3.
+Y **la referencia del papel**, si su búsqueda en `Referencias` (paso 8) no da una sola fila:
+haz esa búsqueda ya aquí y pregunta con lo demás, enseñando las candidatas.
+Y **la clase de entidad** si vas a forzarla con `--mercantil` o `--sin-animo-de-lucro`
+(paso 5): esos flags se confirman con el auditor antes de pasarlos, no se deducen de la
+forma jurídica.
 
 **Mira la importancia relativa de trabajo (`IR_T`)** que devuelve
 `contexto_expediente`. Es lo que decide qué epígrafes se analizan: por debajo de
@@ -148,6 +179,12 @@ Dile al usuario, antes de empezar, que vas a analizar el balance y la cuenta de
 resultados de los cinco últimos ejercicios y que **puede tardar**. Es un análisis
 sobre cinco ejercicios completos y conviene que sepa que no se ha colgado.
 
+Los ficheros exportados van a `<TRABAJO>`, que es una carpeta local: aquí no hay contenedor ni copias que subir. Es la carpeta de esta ejecución: no la compartas con otro procedimiento ni con otra conversación.
+
+
+Cuando el MCP y los scripts comparten disco —en la máquina del auditor—, `<EXPORT>` es
+`<TRABAJO>` mismo: se exporta ahí y los scripts leen de ahí, sin subir ni copiar nada.
+
 ### Paso 3 — Traer el catálogo de riesgos del máster
 
 **El catálogo está en el máster, no en el expediente.** Son dos ficheros `.gs3`
@@ -161,14 +198,10 @@ cargado otro. Basta con la ruta:
 
 ```
 configurar(master_file = "<ruta del máster CON RIESGOS>")
-exportar_consulta(entidad = "catalogo_riesgos", ruta = "<TRABAJO>/catalogo.json")
+exportar_consulta(entidad = "catalogo_riesgos", ruta = "<EXPORT>/catalogo.json")
 ```
 
-Si no tienes la ruta, **pídesela**. Suele estar en una carpeta tipo
-`Master Gesia <año>` y el fichero lleva `CON RIESGOS` en el nombre. Sin máster no
-hay catálogo y el skill **para**: los riesgos no se inventan.
-
-Luego se normaliza al directorio de trabajo:
+La ruta del máster la pediste en el paso 1. Luego se normaliza al directorio de trabajo:
 
 ```bash
 python "<PLUGIN>\skills\identificacion-riesgos\scripts\extraer_catalogo.py" \
@@ -180,10 +213,14 @@ python "<PLUGIN>\skills\identificacion-riesgos\scripts\extraer_catalogo.py" \
 porque por este camino el script no lo sabe. Sin él, el papel de trabajo no dice
 con qué máster se hizo y el aviso de máster desfasado no puede funcionar.
 
-Eso deja `<TRABAJO>/riesgos.json` y `<TRABAJO>/indice.md`. **Lee las tres últimas
-líneas que imprime**: el recuento, el máster del que sale y con qué número
-aparecen en él los dos riesgos obligatorios. Si el recuento es muy inferior a
+Eso deja `<TRABAJO>/riesgos.json` (~240 KB) y `<TRABAJO>/indice.md` (~8 KB). **Lee
+las tres últimas líneas que imprime**: el recuento, el máster del que sale y con qué
+número aparecen en él los dos riesgos obligatorios. Si el recuento es muy inferior a
 cien, el máster indicado no es el que lleva los riesgos.
+
+Para elegir, **lee el índice, no el JSON**: el índice trae área, id, nombre y las
+marcas de significativo y afirmaciones, que es lo que hace falta. El detalle de un
+riesgo lo saca `generar_informe.py` del JSON por su id.
 
 Por qué se lee y no viaja empaquetado, que era como estaba hasta el 26/08/2026:
 
@@ -202,9 +239,9 @@ Por qué se lee y no viaja empaquetado, que era como estaba hasta el 26/08/2026:
 **Tres entidades, tres ficheros, ninguna consulta escrita a mano.**
 
 ```
-exportar_consulta(entidad = "cifras_balance", ruta = "<TRABAJO>/balance.json")
-exportar_consulta(entidad = "cifras_pyg",     ruta = "<TRABAJO>/pyg.json")
-exportar_consulta(entidad = "cifras_ratios",  ruta = "<TRABAJO>/ratios.json")
+exportar_consulta(entidad = "cifras_balance", ruta = "<EXPORT>/balance.json")
+exportar_consulta(entidad = "cifras_pyg",     ruta = "<EXPORT>/pyg.json")
+exportar_consulta(entidad = "cifras_ratios",  ruta = "<EXPORT>/ratios.json")
 ```
 
 Van a fichero y no a tu contexto porque son cientos de filas de contabilidad que
@@ -285,15 +322,21 @@ asociación en los epígrafes del balance, y **cuando el plan contable es el PGC
 estándar no lo encuentra aunque la entidad lo sea**: el balance dice «Fondos
 propios» igual que el de una mercantil. Pasó tres veces con el mismo expediente. El
 flag existe para no tener que corregir el JSON después, y `--mercantil` fuerza lo
-contrario. Si no sabes qué es la entidad, pregúntalo: cambia cómo se llama la
-cuenta de resultados en todo el informe.
+contrario. **Los dos se confirman con el auditor antes de pasarlos** —en la tanda de
+preguntas del paso 1—, no se deducen de la razón social ni de la forma jurídica: cambian
+cómo se llama la cuenta de resultados en todo el informe. Sin flag manda la detección
+automática, y el script rotula de dónde sale la clase (`indicado con --mercantil`,
+`deducido del vocabulario del balance`).
 
 Salida `1` → el expediente no tiene cifras suficientes: **para y dilo**.
 
 **Lee el `analisis_resumen.md` que deja al lado, no el JSON.** El resumen trae las
-variaciones y concentraciones disparadas, que es lo que hace falta para elegir; el
-JSON completo es la fuente de auditoría y solo se consulta para un epígrafe
-concreto, con un `grep` puntual. Son 1,8 KB frente a 10,6 KB.
+variaciones y concentraciones disparadas, que es lo que hace falta para elegir, y al
+final la tabla **«Cifras para la narrativa»**: los epígrafes del balance por encima de la
+IR_T y las líneas principales de la cuenta de resultados, con el ejercicio, el anterior,
+la diferencia y la variación, ya convertidos a número y con el signo de Gesia. El JSON
+completo es la fuente de auditoría y solo se consulta para un epígrafe concreto, con un
+`grep` puntual.
 
 **`--ir-t` filtra por materialidad**: solo se analizan los epígrafes cuyo saldo
 del ejercicio auditado supera esa cifra en valor absoluto. El **resultado del
@@ -455,7 +498,7 @@ aborte. Con `--area H` los saca todos los de un área y con `--procedimientos`
 añade los procedimientos previstos.
 
 El `nombre` tiene que ser el del catálogo, carácter por carácter. Si no lo pones,
-se usa el del catálogo; si lo pones distinto, el validador aborta.
+se usa el del catálogo —y no es un aviso—; si lo pones distinto, el validador aborta.
 
 ### Paso 7 — Validar la selección (puede abortar)
 
@@ -464,22 +507,32 @@ python "<PLUGIN>\skills\identificacion-riesgos\scripts\validar_seleccion.py" \
     --seleccion "<TRABAJO>/seleccion.json" \
     --analisis "<TRABAJO>/analisis.json" \
     --catalogo "<TRABAJO>/riesgos.json" \
-    --ejercicio 2025
+    --ejercicio 2025 \
+    --avisos-salida "<TRABAJO>/avisos.json"
 ```
 
 **`--catalogo` es obligatorio y sin él el script aborta**: el catálogo ya no viaja
-dentro del plugin, sale del máster. Es el mismo `riesgos.json` del paso 2.
+dentro del plugin, sale del máster. Es el mismo `riesgos.json` del paso 3.
 
 `--ejercicio` es el año auditado, el que sacaste de `Auditorias`. Solo sirve para
-avisar de que el catálogo es de un máster de otro año, que es de las cosas que no
-se ven leyendo el informe terminado.
+avisar de que el catálogo es de un máster **anterior** al ejercicio, que es de las cosas
+que no se ven leyendo el informe terminado. Un máster **posterior** —el de 2025 en un
+encargo de 2024— es lo normal: la firma mantiene solo el máster vigente. Sale como línea
+`INFO` y no es un aviso: no lo cuentes, no lo comentes como incidencia ni lo lleves al
+informe.
 
 Al final imprime, siempre, **de qué máster sale el catálogo y con qué número
 aparecen en él los dos obligatorios**. Es la línea que hay que mirar si algo no
 cuadra.
 
 Salida `2` → **para**, no se genera informe. Salida `1` son avisos y hay que
-contarlos: el más importante es un riesgo elegido sin evidencia cuantitativa.
+contarlos: el más importante es un riesgo elegido sin evidencia cuantitativa. Las
+líneas `INFO` no son avisos ni cambian la salida (un riesgo sin `nombre`, por ejemplo).
+
+**Los avisos tienen que constar en el informe, y llegan solos**: `--avisos-salida` los
+deja en `<TRABAJO>/avisos.json` y `generar_informe.py` los pone en la Nota. No los copies
+a mano en la narrativa. **Si corriges la selección, vuelve a validar**: el informe
+comprueba que la validación es de la selección que lleva y, si no, no se genera.
 
 ### Paso 7 bis — Escribir el análisis
 
@@ -501,6 +554,13 @@ línea en blanco:
 | `revision_analitica` | qué dicen los ratios, y si confirman o contradicen lo anterior |
 | `resumen` | el cierre: la situación del encargo y por qué los riesgos elegidos son esos. Se escribe **después** de elegirlos, para poder hablar de ellos |
 
+**Redáctala con la tabla «Cifras para la narrativa» de `analisis_resumen.md`** y, para
+los ratios, con `analisis_ra_resumen.md`: ahí están las cifras ya convertidas y con su
+etiqueta. **No abras `analisis.json` ni los volcados** para sacarlas: los importes vienen
+como texto con coma decimal y leerlos a mano es donde se cuela el error —un `float()` que
+revienta, o el dato de un ratio que no era—. Si una cifra que necesitas no está en los
+resúmenes, `grep` puntual de ese epígrafe o ratio en el JSON, y nada más.
+
 Cíñete a las cifras que salieron del análisis. Este texto va en un papel de trabajo
 firmado: nada de adjetivos que no sostenga un número.
 
@@ -512,22 +572,38 @@ python "<PLUGIN>\skills\identificacion-riesgos\scripts\generar_informe.py" \
     --seleccion "<TRABAJO>/seleccion.json" --narrativa "<TRABAJO>/narrativa.json" \
     --cliente "<razón social>" --cierre "<31/12/25>" --sector "<sector>" \
     --generado "<AAAA-MM-DD>" --ref "<referencia>" \
-    --catalogo "<TRABAJO>/riesgos.json" \
+    --catalogo "<TRABAJO>/riesgos.json" --avisos "<TRABAJO>/avisos.json" \
     --salida "<destino>/Riesgos <CLIENTE> <EJERCICIO>.docx"
 ```
 
 **El destino es la carpeta del expediente**, directamente: `<expediente>/AsistenteIA/IdentificacionRiesgos/`.
 
+**Antes de generarlo, mira si ya hay un informe con ese nombre** en
+`<expediente>\AsistenteIA\IdentificacionRiesgos\` (en el sistema de ficheros). Si existe, **pregunta**: sobrescribirlo o guardar el nuevo
+como `Riesgos <CLIENTE> <EJERCICIO> (rehecho AAAA-MM-DD).docx`, con la fecha de hoy.
+Nunca se sobrescribe sin preguntar. El nombre elegido va en `--salida` y es la
+ruta final de todo lo que sigue, el sellado incluido.
+
 `--generado` lo pones tú: nada aquí lee el reloj. **`--catalogo` es obligatorio**,
-igual que en el paso anterior.
+igual que en el paso anterior, y **`--avisos` también**: es el JSON que dejó la
+validación. Si la validación falló o es de otra selección, el script no genera nada.
 
 **`--ref` es obligatoria y no tiene valor por defecto a propósito**: escribir una
 referencia inventada mete en el expediente un código que no existe en el índice de
-Gesia.
+Gesia, o que existe y es el de otro papel.
 
-**Búscala primero en el expediente, y pregunta solo si no sale una y solo una.**
-El papel suele existir ya, y preguntar por algo que está a una consulta es hacerle
-perder el tiempo al auditor:
+**El código sale de la tabla `Referencias` de ESTE expediente, y de ningún otro sitio.**
+Ni de memoria, ni de un ejemplo, ni de otro expediente, ni como «lo habitual es…»: no se
+elige ni se **propone** un código que no hayas visto en una fila de esta consulta.
+`CodigoReferencia` no es estable entre encargos —el mismo código apunta a papeles distintos
+en expedientes distintos—. Medido el 21/10/2026 en un expediente real: no tenía ninguna
+referencia de valoración de riesgos, se propuso de memoria un código que en otros lo es, el
+usuario lo aceptó, y en ese expediente el código era el de la normativa aplicable: el
+informe quedó archivado bajo la referencia de otro papel. Lo estable es el texto de
+`Referencia`, y por eso se busca por él.
+
+**1. Búscala por el texto.** El papel suele existir ya, y preguntar por algo que está a una
+consulta es hacerle perder el tiempo al auditor:
 
 ```sql
 SELECT CodigoReferencia, Referencia FROM Referencias
@@ -538,12 +614,39 @@ El `%` de en medio se come la tilde, así que no depende de cómo esté escrita.
 los dos expedientes medidos el 04/09/2026 devuelve una sola fila,
 `Identificación y valoración de riesgos`.
 
-- **Una fila** → úsala, y dile al usuario cuál has cogido.
-- **Ninguna, o más de una** → pregúntale, enseñándole lo que has encontrado.
+- **Una fila** → úsala, y dile al usuario cuál has cogido, con su código y su nombre.
+- **Ninguna, o más de una** → no elijas: pasa al punto 2.
 
-**No fijes el código que salga.** `CodigoReferencia` no es estable entre encargos:
-el mismo código apunta a papeles distintos en expedientes distintos. Lo estable es
-el texto de `Referencia`, y por eso se busca por él.
+**2. Si no da una sola fila, una segunda búsqueda más amplia, y se pregunta.**
+
+```sql
+SELECT TOP 30 CodigoReferencia, Referencia FROM Referencias
+WHERE Referencia LIKE '%riesgo%' OR Referencia LIKE '%planificaci%n%'
+ORDER BY CodigoReferencia
+```
+
+En JET el comodín es `%`; con `*` sale vacía sin dar error. **Enséñale las candidatas al
+usuario, cada una con su código y su nombre tal como vienen, y pregúntale cuál es**: en un
+expediente sin el papel de valoración salen cosas como «Riesgos emergentes», «Riesgos
+identificados» o «Planificación», y cuál de ellas recoge este informe lo decide él. Aunque
+salga una sola, se pregunta. Si no sale ninguna, díselo así y pregúntale igual.
+
+**3. Si el usuario da un código, compruébalo antes de usarlo** —también si lo dice de
+entrada, sin que se lo preguntes—:
+
+```sql
+SELECT CodigoReferencia, Referencia FROM Referencias
+WHERE CodigoReferencia = '<el código que ha dado>'
+```
+
+Enséñale el nombre que tiene en este expediente y espera a que lo confirme. Si no devuelve
+ninguna fila, ese código no existe aquí: díselo y no lo uses.
+
+**Si no tiene referencia para este papel**, se pasa vacía (`--ref ""`) y la celda queda
+en blanco: es mejor un hueco que el código de otro papel.
+
+Para no preguntar dos veces, **haz esta búsqueda ya en el paso 1**, con lo demás que
+falta, y pregunta la referencia en la misma tanda si hace falta.
 
 La línea **Fuente** se compone sola con lo que de verdad se ha usado: «Balance de
 situación, Cuenta de pérdidas y ganancias y módulo de Revisión analítica
@@ -560,6 +663,14 @@ El informe lleva las cifras en tablas y un gráfico de la evolución del resulta
 Si `matplotlib` no está disponible, sale sin gráfico y con las mismas cifras en
 tabla. El PNG del gráfico se incrusta en el `.docx` y el script lo borra solo.
 
+**Y termina con el apartado «Utilización de herramientas de inteligencia artificial»**,
+con una marca en la cabecera, junto a Realizado y Verificado: la evidencia de que el informe
+se hizo con una herramienta de IA, de qué se le facilitó y de cómo debe verificarse. Dice que
+la selección y los textos de análisis los ha redactado la herramienta. Los apartados de la
+herramienta quedan con huecos que se rellenan al archivar (paso 9); los de verificación,
+verificado por, efecto en la conclusión y revisión **son del equipo y salen en blanco**. No
+escribas nada en ellos ni propongas texto para ellos.
+
 **Si inspeccionas el `.docx` por dentro, lee siempre en UTF-8.** El título de
 `docProps/core.xml` sale bien; el 04/09/2026 se dio por corrupto porque se leyó con
 la codificación de la consola, que enseña `Identificaci?n`. Comprobado a nivel de
@@ -567,34 +678,65 @@ byte: son `c3 b3`, que es UTF-8 correcto. No hay nada que arreglar ahí.
 
 ### Paso 9 — Entregar
 
-Di dónde ha quedado, **cuántos riesgos** lleva y de qué áreas. Si has propuesto
-menos de los pedidos, di por qué. Recuérdale que el informe es una propuesta y que
-la valoración del riesgo y la firma son suyas.
+**Con el informe ya en el disco del auditor**, en
+`<expediente>\AsistenteIA\IdentificacionRiesgos\`, llama a
 
-**Los temporales.** Los volcados de `exportar_consulta` los borra
-`limpiar_exportaciones()`, y esa es la vía: funciona igual en local y en Cowork
-—lo borra el MCP, que corre en la máquina del usuario— y no hay que decirle qué
-ficheros, porque borra los que él escribió. Si alguno no se deja borrar, lo dice
-con su ruta.
-
-El directorio de trabajo va aparte:
-
-```bash
-rm -rf "<TRABAJO>"
+```
+sellar_uso_ia(ruta = "<expediente>/AsistenteIA/IdentificacionRiesgos/<fichero>",
+              modelo = "<el modelo con el que trabajas>",
+              procedimiento = "identificacion-riesgos")
 ```
 
-**Y cuenta con que en Cowork no te dejen**: el puente no tiene permiso de borrado
-en el equipo del usuario (comprobado el 25/08/2026). Por eso los volcados van a la
-carpeta temporal del sistema y **nunca a `AsistenteIA`**, donde solo debe quedar
-el entregable.
+Rellena en el apartado de uso de IA lo que solo sabe la aplicación: herramienta y versiones,
+quién lo ejecutó, dónde corrieron los scripts y **qué información se facilitó y cómo**, según
+lo que el MCP ha servido desde el paso 1. `procedimiento` es el mismo nombre que el perfil del
+paso 1. En `modelo` pon el nombre y la versión que te da tu propio contexto; si no lo sabes,
+déjalo vacío. **Sin esta llamada el informe queda con huecos que dicen «pendiente»**: no se da
+por entregado.
+
+**Si el MCP avisa —aquí o en cualquier paso— de que otra conversación trabaja con otro
+expediente o perfil en el mismo servidor, no selles ni limpies todavía.** Díselo al auditor y
+espera a que confirme que la otra ha terminado: lo que el sello dice que se facilitó, y lo
+que la limpieza borra, es la cuenta de este procedimiento, y otra conversación a la vez la
+puede alterar.
+
+Di dónde ha quedado, **cuántos riesgos** lleva y de qué áreas. Si has propuesto
+menos de los pedidos, di por qué. Recuérdale que el informe es una propuesta y que
+la valoración del riesgo y la firma son suyas, y que el apartado de uso de IA deja la
+verificación, quién la hace, su efecto en la conclusión y la revisión en blanco para el
+equipo: mientras lo estén, el informe no es evidencia de auditoría.
+
+**Los temporales.** Los volcados de `exportar_consulta` los borra
+
+```
+limpiar_exportaciones(procedimiento = "identificacion-riesgos")
+```
+
+y esa es la vía: funciona igual en local y en Cowork —lo borra el MCP, que corre en
+la máquina del usuario— y no hay que decirle qué ficheros, porque borra los que él
+escribió **para este procedimiento**, y solo esos: lo que haya exportado otro skill
+en la misma sesión no lo toca. Si alguno no se deja borrar, lo dice con su ruta:
+trasládasela al usuario.
+
+El directorio de trabajo va aparte, **borrado desde fuera** —no estás dentro, porque
+no se entra con `cd`— y **con la ruta literal que anotaste al crearlo**, escrita entera:
+
+```bash
+rm -rf "<la ruta que anotaste>"
+```
+
+
+Por eso los volcados **nunca van a `AsistenteIA`**, donde solo debe quedar el
+entregable.
 
 Si el borrado del directorio de trabajo falla, dos cosas, en este orden:
 
 1. **Si el entorno ofrece una herramienta para pedir permiso de borrado**, pídelo
    **una vez**. Es mejor que informar y no hacer nada, y si el usuario lo concede
    queda resuelto para el resto de la sesión.
-2. **Si no la hay o la deniega, di las rutas exactas** de lo que queda. Sin
-   adornos: son datos de su cliente y tiene que poder borrarlos él.
+2. **Si no la hay o la deniega, di la ruta exacta** de lo que queda —la que anotaste,
+   entera—. Sin adornos: son datos de su cliente y tiene que poder
+   borrarlos él.
 
 Lo que no vale es dejarlo en un «puede que queden temporales» sin decir dónde.
 
@@ -612,6 +754,8 @@ Lo que no vale es dejarlo en un «puede que queden temporales» sin decir dónde
 - **No usa el campo `Clasificacion`** del catálogo (I/R/A): no se sabe qué
   significa y no se muestra nada que no se pueda explicar.
 - **No detecta el sector.** Lo pregunta.
+- **No verifica su propio resultado por el equipo.** Propone qué contrastar; la verificación,
+  quién la hace y su efecto en la conclusión los escribe el equipo en el apartado de uso de IA.
 
 ## Degradación
 
@@ -624,8 +768,19 @@ Lo que no vale es dejarlo en un «puede que queden temporales» sin decir dónde
 | Un id que no está en el catálogo | **aborta.** No se genera el informe |
 | Falta uno de los dos riesgos obligatorios | **aborta** |
 | Los dos obligatorios no se resuelven por nombre en el catálogo | **aborta.** Suele ser un máster sin riesgos |
-| El máster es de otro año que el ejercicio auditado | avisa, y el aviso consta en el informe |
+| El máster es anterior al ejercicio auditado | avisa, y el aviso consta en el informe |
+| El máster es posterior al ejercicio auditado (el vigente) | lo normal: línea `INFO`, sin aviso ni salida `1` |
+| La validación deja avisos | salida `1`; los avisos van a `avisos.json` y de ahí a la Nota del informe |
+| Un riesgo sin `nombre` | se usa el del catálogo; línea `INFO`, no es aviso |
+| `avisos.json` es de otra selección, o de una validación fallida | **aborta** el informe: hay que volver a validar |
+| La búsqueda de la referencia por texto no da una sola fila | segunda búsqueda más amplia y se pregunta enseñando las candidatas con código y nombre; nunca un código que no salga de `Referencias` de este expediente |
+| El usuario da un código de referencia | se comprueba en `Referencias` y se le enseña su nombre antes de usarlo; si no existe, no se usa |
+| El usuario no tiene referencia para el papel | `--ref ""`: la celda queda en blanco |
+| `configurar` avisa de otra conversación en el mismo servidor | **para** hasta que el auditor confirme que la otra ha terminado |
+| Ya hay un informe con ese nombre en la carpeta | se pregunta: sobrescribir o guardar con « (rehecho AAAA-MM-DD)»; nunca se sobrescribe sin preguntar |
 | `matplotlib` no disponible | informe sin gráfico, cifras en tabla |
+| `sellar_uso_ia` dice que no hay huecos | el informe ya estaba sellado o no es el que escribió el script: no lo repitas, dilo |
+| `sellar_uso_ia` dice que no tiene constancia de lo facilitado | o no se sirvió nada por el plugin, o el MCP se reinició a mitad: el informe lo dice y remite a `RegistroEmision.jsonl`; cuéntaselo al auditor tal cual |
 
 ## Arnés
 
@@ -638,6 +793,10 @@ No necesita Gesia, ni red, ni un máster en disco: lleva dentro las dos
 numeraciones medidas y comprueba que los dos riesgos obligatorios se resuelven por
 nombre en cada una. Con `--catalogo` comprueba además uno de verdad, y es la forma
 rápida de ver con qué número salen los obligatorios en el máster del cliente.
+
+Comprueba también que cada script arranca con `python -I` desde otra carpeta, que un
+riesgo sin nombre no cuenta como aviso, y que los avisos de la validación llegan al
+Word —y que el informe no acepta la validación de otra selección ni una fallida—.
 
 Se escribió el 04/09/2026 con el fallo delante, y muerde: devolviendo los ids fijos
 que había antes, nueve de sus comprobaciones fallan.

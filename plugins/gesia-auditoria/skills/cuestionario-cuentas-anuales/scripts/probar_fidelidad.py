@@ -15,8 +15,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
 
 from openpyxl import load_workbook
+
+# Los modulos hermanos se buscan junto a este fichero: con `python -I` la carpeta
+# del script no entra en sys.path y el import fallaba (registro del 20/10/2026).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from lib_cuestionario import salida_utf8
 

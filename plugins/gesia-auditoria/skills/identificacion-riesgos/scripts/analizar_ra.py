@@ -22,7 +22,10 @@ import json
 import sys
 from pathlib import Path
 
-from lib_riesgos import con_resumen, inmaterial, ruta_resumen
+# con `python -I` la carpeta del script no entra en sys.path y lib_riesgos no se encuentra
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib_riesgos import con_resumen, inmaterial, ruta_resumen  # noqa: E402
 
 # Un ratio que se mueve en la misma direccion este numero de años seguidos, o
 # mas, es una tendencia y no ruido. Tres de cinco es lo minimo que permite

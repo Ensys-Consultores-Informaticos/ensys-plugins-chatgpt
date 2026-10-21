@@ -17,7 +17,10 @@ import argparse
 import sys
 from pathlib import Path
 
-from lib_riesgos import cargar_catalogo, riesgo_legible, salida_utf8
+# con `python -I` la carpeta del script no entra en sys.path y lib_riesgos no se encuentra
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib_riesgos import cargar_catalogo, riesgo_legible, salida_utf8  # noqa: E402
 
 ANCHO = 78
 

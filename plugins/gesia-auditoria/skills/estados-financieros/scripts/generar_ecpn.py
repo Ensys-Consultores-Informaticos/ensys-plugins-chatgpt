@@ -2,11 +2,13 @@
 """Escribe el papel de revision del patrimonio neto (ECPN) en Excel.
 
     python generar_ecpn.py --estructura estructura.json --cuentas cuentas.json
-        --ejercicios ejercicios.json --cliente "..." --ejercicio 2025
+        --ejercicios ejercicios.json --cliente "..." --ejercicio 2025 --generado 19/10/2026
         --salida "<expediente>/AsistenteIA/EstadosFinancieros/Patrimonio Neto <CLIENTE> <EJERCICIO>.xlsx"
 
-Cuatro hojas:
+Cinco hojas:
 
+  Uso de IA       la primera: la evidencia del uso de IA (lib_uso_ia), con lo del equipo en
+                  blanco y huecos que rellena sellar_uso_ia al archivar el papel
   PatrimonioNeto  los epigrafes de patrimonio neto de los ejercicios cargados, comparados
   Movimiento      EL ESTADO: por componente, de la apertura auditada al cierre auditado,
                   pasando por el movimiento del cliente, los ajustes y las reclasificaciones
@@ -26,7 +28,8 @@ del balance al que esta asignada cada cuenta. Capital, prima, reservas, resultad
 resultado del ejercicio, otras aportaciones, ajustes por cambios de valor y subvenciones salen
 de ahi, no de leer el numero de cuenta.
 
-Como en el resto del skill, se escriben VALORES y no formulas.
+Como en el resto del skill, se escriben VALORES y no formulas. Y nada lee el reloj: la fecha
+de generacion llega con --generado (regla 4).
 """
 
 from __future__ import annotations
@@ -34,19 +37,25 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import date
+from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from lib_eeff import (
+# Los modulos de la carpeta se encuentran aunque se ejecute con `python -I`, que no pone la
+# carpeta del script en sys.path (prueba en Cowork, 20/10/2026).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib_eeff import (  # noqa: E402
     exigir_tokens,
     TOLERANCIA,
     a_float,
     ejercicios,
     es_si,
     estructura_ordenada,
+    frase_terceros,
+    frases_comprobacion,
     hojas,
     leer_json,
     lineas_pn,
@@ -56,6 +65,19 @@ from lib_eeff import (
     salida_utf8,
     saldo,
     texto,
+)
+from lib_uso_ia import hoja_uso_ia, marcar_papel  # noqa: E402
+
+# La fecha de generacion, la que pasa el modelo con --generado. Se fija en main().
+GENERADO = ""
+
+# Lo que el equipo podria contrastar. Describe, no dictamina: el alcance es suyo.
+PROPUESTA = (
+    "Contrastar la apertura y el cierre de cada componente del patrimonio neto con las cuentas "
+    "anuales formuladas y con el balance auditado del ejercicio anterior. Revisar los componentes "
+    "con ajuste o reclasificación (hojas Movimiento y Detalle) contra los asientos de ajuste del "
+    "expediente, y cualquier comprobación que no cuadre. El reparto de la variación entre "
+    "resultado, operaciones con socios y otras variaciones no lo hace este papel."
 )
 
 FONT = "Calibri"
@@ -100,10 +122,12 @@ def _titulo(ws, cliente: str, ejercicio: str, subtitulo: str) -> int:
     ws["A1"].font = Font(name=FONT, bold=True, size=13)
     ws["A2"] = subtitulo
     ws["A2"].font = Font(name=FONT, size=10, italic=True, color="595959")
-    ws["A3"] = ("Papel de trabajo preparado por Asistente IA el "
-                + date.today().strftime("%d/%m/%Y")
+    ws["A3"] = ("Papel de trabajo preparado por Asistente IA"
+                + (" el " + GENERADO if GENERADO else "")
                 + ". Revisión: reconcilia el patrimonio neto del expediente, no formula el ECPN.")
     ws["A3"].font = Font(name=FONT, size=9, color="808080")
+    # en todas las hojas, no solo en la primera: una hoja impresa suelta tambien la lleva
+    marcar_papel(ws, "A4", "B4")
     return 5
 
 
@@ -269,9 +293,13 @@ def main() -> int:
     p.add_argument("--cliente", required=True)
     p.add_argument("--ejercicio", default="")
     p.add_argument("--salida", required=True)
+    p.add_argument("--generado", required=True,
+                   help="fecha de generacion, dd/mm/aaaa: nada aqui lee el reloj")
     p.add_argument("--nombres-en-claro", action="store_true",
-                   help="solo si el auditor ha apagado la tokenizacion: configurar dice «forzado por el auditor»")
+                   help="solo si el auditor ha apagado la seudonimizacion: configurar dice «forzado por el auditor»")
     a = p.parse_args()
+    global GENERADO
+    GENERADO = a.generado
 
     estructura = leer_json(a.estructura)
     cuentas = leer_json(a.cuentas)
@@ -302,12 +330,16 @@ def main() -> int:
     totales, descuadres = _hoja_movimiento(wb, pn, cuentas, a.cliente, ejercicio, anterior)
     n_cuentas = _hoja_detalle(wb, pn, cuentas, a.cliente, ejercicio)
 
+    # Cada detalle lleva su SUJETO: en «PARA CONTAR AL ENTREGAR» va sin el titulo, que esta en
+    # otra columna de la hoja, y se copia literal al auditor. «NO los usa el cliente», leido
+    # solo, no decia que (los grupos 8 y 9; registro del 21/10/2026).
     comprobaciones = []
     comprobaciones.append((
         "En cada componente, apertura + movimiento + ajustes + reclasificaciones = cierre",
         not descuadres,
         f"cuadra en todos los componentes con saldo" if not descuadres
-        else f"{len(descuadres)} no cuadran: "
+        else f"{len(descuadres)} componentes del patrimonio neto no cumplen apertura + movimiento "
+             "+ ajustes + reclasificaciones = cierre: "
              + "; ".join(f"{c} ({d:,.2f} €)" for c, d in descuadres[:3])))
 
     # el cierre del estado contra el epigrafe TOTAL del balance del ejercicio corriente
@@ -318,7 +350,9 @@ def main() -> int:
     comprobaciones.append((
         "El cierre del estado es el patrimonio neto del balance del ejercicio corriente",
         abs(d) <= TOLERANCIA,
-        f"{total_balance:,.2f} €" if abs(d) <= TOLERANCIA else f"difieren en {d:,.2f} €"))
+        f"{total_balance:,.2f} €" if abs(d) <= TOLERANCIA
+        else f"el cierre del estado de patrimonio neto ({totales[4]:,.2f} €) y el patrimonio neto "
+             f"del balance de {ejercicio} ({total_balance:,.2f} €) difieren en {d:,.2f} €"))
 
     # LA CONTINUIDAD: la apertura contra el patrimonio neto auditado del ejercicio anterior
     if len(cols) >= 2:
@@ -330,8 +364,10 @@ def main() -> int:
             f"La apertura es el patrimonio neto auditado de {anterior or 'N-1'}, sin saltos",
             abs(d) <= TOLERANCIA,
             f"{total_anterior:,.2f} €" if abs(d) <= TOLERANCIA
-            else f"difieren en {d:,.2f} €: el ejercicio abre con un patrimonio neto distinto "
-                 "del que cerró el anterior, y eso hay que explicarlo"))
+            else f"la apertura del patrimonio neto ({totales[0]:,.2f} €) y el patrimonio neto "
+                 f"auditado de {anterior or 'N-1'} ({total_anterior:,.2f} €) difieren en "
+                 f"{d:,.2f} €: el ejercicio abre con un patrimonio neto distinto del que cerró el "
+                 "anterior, y eso hay que explicarlo"))
 
     # el resultado del ejercicio del estado contra el de la cuenta de resultados
     resultado_pyg = None
@@ -350,8 +386,9 @@ def main() -> int:
             comprobaciones.append((
                 "El resultado del ejercicio del patrimonio neto es el de la cuenta de resultados",
                 None,
-                "no se ha encontrado la línea de resultado del ejercicio en el patrimonio neto "
-                "de este modelo de balance: la comprobación no se ha podido hacer"))
+                "no se ha podido comparar el resultado del ejercicio del patrimonio neto con el "
+                "de la cuenta de resultados: no se ha encontrado la línea de resultado del "
+                "ejercicio en el patrimonio neto de este modelo de balance"))
         else:
             resultado_pn = 0.0
             for f in lineas_res:
@@ -360,7 +397,9 @@ def main() -> int:
             comprobaciones.append((
                 "El resultado del ejercicio del patrimonio neto es el de la cuenta de resultados",
                 abs(d) <= TOLERANCIA,
-                f"{resultado_pyg:,.2f} €" if abs(d) <= TOLERANCIA else f"difieren en {d:,.2f} €"))
+                f"{resultado_pyg:,.2f} €" if abs(d) <= TOLERANCIA
+                else f"el resultado del ejercicio del patrimonio neto ({resultado_pn:,.2f} €) y el "
+                     f"de la cuenta de resultados ({resultado_pyg:,.2f} €) difieren en {d:,.2f} €"))
 
     # los grupos 8 y 9: si no se usan, el estado de ingresos y gastos reconocidos no se desglosa
     usa_89 = any(texto(c.get("Cuenta"))[:1] in GRUPOS_IMPUTACION
@@ -370,10 +409,12 @@ def main() -> int:
         True if usa_89 else None,
         "sí: el estado de ingresos y gastos reconocidos se puede desglosar desde la contabilidad"
         if usa_89 else
-        "NO los usa el cliente. El patrimonio neto cuadra igual, pero el estado de ingresos y "
-        "gastos reconocidos no sale de la contabilidad: hay que construirlo con el auditor"))
+        "el cliente NO usa los grupos 8 y 9 (ingresos y gastos imputados al patrimonio neto). El "
+        "patrimonio neto cuadra igual, pero el estado de ingresos y gastos reconocidos no sale de "
+        "la contabilidad: hay que construirlo con el auditor"))
 
     _hoja_comprobaciones(wb, comprobaciones, a.cliente, ejercicio)
+    _uso_ia(wb, a, cuentas, comprobaciones, ejercicio, anterior, totales, n_cuentas)
 
     destino = os.path.abspath(a.salida)
     os.makedirs(os.path.dirname(destino), exist_ok=True)
@@ -395,6 +436,39 @@ def main() -> int:
         return 1
     print("  todas las comprobaciones cuadran")
     return 0
+
+
+def _uso_ia(wb: Workbook, a, cuentas: list, comprobaciones: list, ejercicio: str,
+            anterior: str, totales: list, n_cuentas: int) -> None:
+    """La hoja de evidencia del uso de IA, la primera del libro (lib_uso_ia).
+
+    Las comprobaciones son las de la hoja Comprobaciones, calculadas sobre lo que lleva el
+    papel, mas la de los nombres de terceros. Van como resultado de la herramienta, nunca como
+    verificacion: esa es del equipo y queda en blanco.
+    """
+    hojas_papel = list(wb.sheetnames)      # antes de añadir la de uso de IA
+    hoja_uso_ia(
+        wb,
+        papel=a.cliente + " · Ejercicio " + ejercicio + " · Patrimonio neto",
+        procedimiento="estados-financieros",
+        descripcion=("Revisión del movimiento del patrimonio neto del expediente: cada componente, "
+                     "de la apertura auditada al cierre auditado, pasando por el movimiento del "
+                     "cliente, los ajustes y las reclasificaciones de auditoría."),
+        alcance=("Ejercicio " + ejercicio + ", con apertura en el saldo auditado de "
+                 + (anterior or "el ejercicio anterior") + ". Los componentes son los epígrafes de "
+                 "patrimonio neto del balance del expediente."),
+        # los importes, con el mismo formato que los detalles de la hoja Comprobaciones
+        resultado=("Este libro: hojas " + ", ".join(hojas_papel) + ". Patrimonio neto de "
+                   + f"{totales[0]:,.2f} € en la apertura y {totales[4]:,.2f} € en el cierre; "
+                   + str(n_cuentas)
+                   + " cuentas con saldo o movimiento. Las cifras son las del expediente, "
+                     "reconciliadas por el script; la herramienta no ha redactado conclusiones ni "
+                     "reparte la variación entre resultado, operaciones con socios y otras "
+                     "variaciones."),
+        comprobaciones=[frase_terceros(cuentas, a.nombres_en_claro)] + frases_comprobacion(comprobaciones),
+        propuesta=PROPUESTA,
+        generado=a.generado,
+    )
 
 
 if __name__ == "__main__":

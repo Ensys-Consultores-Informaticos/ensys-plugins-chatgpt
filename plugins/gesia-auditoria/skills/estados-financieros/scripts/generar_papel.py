@@ -2,12 +2,14 @@
 """Escribe el papel de trabajo de revision de estados financieros en Excel.
 
     python generar_papel.py --estructura estructura.json --cuentas cuentas.json
-        --ejercicios ejercicios.json --cliente "..." --ejercicio 2025
+        --ejercicios ejercicios.json --cliente "..." --ejercicio 2025 --generado 19/10/2026
         --salida "<expediente>/AsistenteIA/EstadosFinancieros/Estados Financieros <CLIENTE> <EJERCICIO>.xlsx"
 
-Cinco hojas, y ninguna mas:
+Seis hojas, y ninguna mas:
 
-  Balance         la estructura oficial con los ejercicios cargados, variacion y % del ultimo
+  Uso de IA       la primera: la evidencia del uso de IA (lib_uso_ia), con lo del equipo en
+                  blanco y huecos que rellena sellar_uso_ia al archivar el papel
+  Balance        la estructura oficial con los ejercicios cargados, variacion y % del ultimo
   PyG             igual, con el signo de presentacion de Gesia y el peso sobre ventas
   Conciliacion    SOLO el ejercicio corriente: por epigrafe, lo que presenta el cliente, los
                   ajustes, las reclasificaciones y lo auditado. Es el corazon de la revision
@@ -30,6 +32,8 @@ Dos reglas de dominio que no son evidentes, medidas en la fase de contrato:
   * el signo de presentacion NO es el del dato crudo: en el balance el pasivo viene con el
     signo cambiado, y en la PyG la regla es la de Gesia, epigrafes en magnitud y subtotales
     invertidos. Se replica tal cual para que las cifras coincidan con las que ve el auditor
+
+Nada aqui lee el reloj: la fecha de generacion llega con --generado (regla 4).
 """
 
 from __future__ import annotations
@@ -37,13 +41,17 @@ from __future__ import annotations
 import argparse
 import os
 import sys
-from datetime import date
+from pathlib import Path
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
-from lib_eeff import (
+# Los modulos de la carpeta se encuentran aunque se ejecute con `python -I`, que no pone la
+# carpeta del script en sys.path (prueba en Cowork, 20/10/2026).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
+from lib_eeff import (  # noqa: E402
     exigir_tokens,
     DECIMALES,
     ajustes_sin_epigrafe,
@@ -57,11 +65,26 @@ from lib_eeff import (
     ejercicios,
     es_si,
     estructura_ordenada,
+    frase_terceros,
+    frases_comprobacion,
     hojas,
     leer_json,
     salida_utf8,
     saldo,
     texto,
+)
+from lib_uso_ia import hoja_uso_ia, marcar_papel  # noqa: E402
+
+# La fecha de generacion, la que pasa el modelo con --generado. Se fija en main() y la usa la
+# cabecera de cada hoja: nada en este papel lee el reloj.
+GENERADO = ""
+
+# Lo que el equipo podria contrastar. Describe, no dictamina: el alcance es suyo.
+PROPUESTA = (
+    "Contrastar las cifras del balance y de la cuenta de pérdidas y ganancias con las cuentas "
+    "anuales formuladas y con el expediente. Revisar los epígrafes con ajuste o reclasificación "
+    "(hoja Conciliacion) y las cuentas que los mueven (hoja Ajustes) contra los asientos de ajuste "
+    "del expediente, y cualquier comprobación que no cuadre."
 )
 
 FONT = "Calibri"
@@ -94,10 +117,12 @@ def _titulo(ws, cliente: str, ejercicio: str, subtitulo: str) -> int:
     ws["A1"].font = Font(name=FONT, bold=True, size=13)
     ws["A2"] = subtitulo
     ws["A2"].font = Font(name=FONT, size=10, italic=True, color="595959")
-    ws["A3"] = ("Papel de trabajo preparado por Asistente IA el "
-                + date.today().strftime("%d/%m/%Y")
+    ws["A3"] = ("Papel de trabajo preparado por Asistente IA"
+                + (" el " + GENERADO if GENERADO else "")
                 + ". Revisión: no formula las cuentas, las contrasta con el expediente.")
     ws["A3"].font = Font(name=FONT, size=9, color="808080")
+    # en todas las hojas, no solo en la primera: una hoja impresa suelta tambien la lleva
+    marcar_papel(ws, "A4", "B4")
     return 5
 
 
@@ -309,9 +334,13 @@ def main() -> int:
     p.add_argument("--cliente", required=True)
     p.add_argument("--ejercicio", default="")
     p.add_argument("--salida", required=True)
+    p.add_argument("--generado", required=True,
+                   help="fecha de generacion, dd/mm/aaaa: nada aqui lee el reloj")
     p.add_argument("--nombres-en-claro", action="store_true",
-                   help="solo si el auditor ha apagado la tokenizacion: configurar dice «forzado por el auditor»")
+                   help="solo si el auditor ha apagado la seudonimizacion: configurar dice «forzado por el auditor»")
     a = p.parse_args()
+    global GENERADO
+    GENERADO = a.generado
 
     estructura = leer_json(a.estructura)
     cuentas = leer_json(a.cuentas)
@@ -340,19 +369,24 @@ def main() -> int:
     tocados = _hoja_conciliacion(wb, estructura, cuentas, a.cliente, ejercicio)
     n_ajustes = _hoja_ajustes(wb, cuentas, estructura, a.cliente, ejercicio)
 
+    # Cada detalle lleva su SUJETO: en «PARA CONTAR AL ENTREGAR» va sin el titulo y se copia
+    # literal al auditor; «difieren en 5,00 €» leido solo no dice que (registro del 21/10/2026).
     comprobaciones = []
     for i in cols:
         d = cuadre_balance(estructura, i)
         comprobaciones.append((f"El balance de {anios.get(str(i), i)} cuadra: activo = patrimonio neto + pasivo",
                                abs(d) <= TOLERANCIA,
-                               "diferencia 0,00" if abs(d) <= TOLERANCIA else f"difieren en {d:,.2f} €"))
+                               "diferencia 0,00" if abs(d) <= TOLERANCIA
+                               else f"el balance de {anios.get(str(i), i)} no cuadra: el activo y el "
+                                    f"patrimonio neto + pasivo difieren en {d:,.2f} €"))
     rotas = [texto(c.get("Cuenta")) for c in cuentas
              if abs((a_float(c.get("SaldoCliente")) + a_float(c.get("SaldoAj"))
                      + a_float(c.get("SaldoRec"))) - a_float(c.get("SaldoAuditoria"))) > TOLERANCIA]
     comprobaciones.append(("En cada cuenta, cliente + ajustes + reclasificaciones = auditoría",
                            not rotas,
                            f"cuadra en las {len(cuentas)} cuentas" if not rotas
-                           else f"{len(rotas)} cuentas no cuadran: {', '.join(rotas[:5])}"))
+                           else f"{len(rotas)} cuentas no cumplen cliente + ajustes + "
+                                f"reclasificaciones = auditoría: {', '.join(rotas[:5])}"))
     aud = cuentas_por_epigrafe(cuentas, "SaldoAuditoria")
     descuadres = []
     for f in hojas(estructura):
@@ -364,7 +398,8 @@ def main() -> int:
     comprobaciones.append(("Cada epígrafe es la suma de las cuentas asignadas a él",
                            not descuadres,
                            f"coincide en los {len(aud)} epígrafes con cuentas" if not descuadres
-                           else f"{len(descuadres)} epígrafes no coinciden: {', '.join(descuadres[:3])}"))
+                           else f"{len(descuadres)} epígrafes no coinciden con la suma de las cuentas "
+                                f"asignadas a ellos: {', '.join(descuadres[:3])}"))
     comprobaciones.append(("Las cuentas con ajuste o reclasificación están identificadas", True,
                            f"{n_ajustes} cuentas asignadas a un epígrafe, que mueven {len(tocados)} epígrafes"))
     fuera = ajustes_sin_epigrafe(cuentas)
@@ -372,9 +407,12 @@ def main() -> int:
                            "llega a un epígrafe, por sí misma o por su cuenta agregada",
                            not fuera,
                            "ninguna se queda fuera" if not fuera
-                           else f"{len(fuera)} cuenta(s) con ajuste sin epígrafe: "
+                           else f"{len(fuera)} cuenta(s) con ajuste o reclasificación no llegan a "
+                                "ningún epígrafe de los estados, ni por sí mismas ni por su agregada: "
                                 + "; ".join(f"{c} {n} ({v:,.2f} €)" for c, n, v in fuera[:4])))
     _hoja_comprobaciones(wb, comprobaciones, a.cliente, ejercicio)
+    _uso_ia(wb, a, cuentas, comprobaciones, [anios.get(str(i), str(i)) for i in cols], ejercicio,
+            n_ajustes, len(tocados))
 
     destino = os.path.abspath(a.salida)
     os.makedirs(os.path.dirname(destino), exist_ok=True)
@@ -394,6 +432,38 @@ def main() -> int:
         return 1
     print("  todas las comprobaciones cuadran")
     return 0
+
+
+def _uso_ia(wb: Workbook, a, cuentas: list, comprobaciones: list, etiquetas: list,
+            ejercicio: str, n_ajustes: int, n_epigrafes: int) -> None:
+    """La hoja de evidencia del uso de IA, la primera del libro (lib_uso_ia).
+
+    Las comprobaciones son las de la hoja Comprobaciones, calculadas sobre lo que lleva el
+    papel, mas la de los nombres de terceros. Van como resultado de la herramienta, nunca como
+    verificacion: esa es del equipo y queda en blanco.
+    """
+    hojas_papel = list(wb.sheetnames)      # antes de añadir la de uso de IA
+    comparado = (" comparado con " + ", ".join(etiquetas[1:]) if len(etiquetas) > 1
+                 else ", sin ejercicio anterior con cifras")
+    hoja_uso_ia(
+        wb,
+        papel=a.cliente + " · Ejercicio " + ejercicio + " · Estados financieros",
+        procedimiento="estados-financieros",
+        descripcion=("Revisión de los estados financieros del expediente: balance y cuenta de "
+                     "pérdidas y ganancias comparados, y conciliación, epígrafe a epígrafe y cuenta "
+                     "a cuenta, de lo presentado por el cliente a lo auditado."),
+        alcance=("Ejercicio " + ejercicio + comparado + ", con la estructura de balance y de "
+                 "pérdidas y ganancias del modelo del expediente. La conciliación del saldo del "
+                 "cliente al auditado, solo del ejercicio corriente: el expediente no guarda el "
+                 "saldo del cliente de los anteriores."),
+        resultado=("Este libro: hojas " + ", ".join(hojas_papel) + ". " + str(n_ajustes)
+                   + " cuentas con ajuste o reclasificación, en " + str(n_epigrafes)
+                   + " epígrafes. Las cifras son las del expediente, ordenadas y sumadas por el "
+                     "script; la herramienta no ha redactado conclusiones ni propone cifras."),
+        comprobaciones=[frase_terceros(cuentas, a.nombres_en_claro)] + frases_comprobacion(comprobaciones),
+        propuesta=PROPUESTA,
+        generado=a.generado,
+    )
 
 
 if __name__ == "__main__":

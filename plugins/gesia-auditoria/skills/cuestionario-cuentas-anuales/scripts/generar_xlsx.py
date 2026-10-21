@@ -23,6 +23,10 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.utils import get_column_letter
 
+# Los modulos hermanos se buscan junto a este fichero: con `python -I` la carpeta
+# del script no entra en sys.path y el import fallaba (registro del 20/10/2026).
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 from lib_cuestionario import (COLUMNAS, RESPUESTAS, es_cabecera,
                               leer_cuestionario, salida_utf8, valor_celda)
 
