@@ -77,6 +77,7 @@ Gesia lleva todos.
 | `estados-financieros` | Balance y cuenta de resultados comparados, la conciliación de lo presentado por el cliente a lo auditado, el patrimonio neto y el estado de flujos de efectivo con sus ajustes | — |
 | `identificacion-riesgos` | Elige los riesgos del catálogo del máster conforme a la NIA-ES 315 | — |
 | `investigacion-entidad` | Investiga al cliente en fuentes públicas —BORME, contratación pública, subvenciones, jurisprudencia y prensa— con tres subagentes en paralelo, y deja un Word con cada hecho citado a su fuente | — |
+| `cuadro-mando` | Una página HTML, que se abre sin internet, con el estado del encargo por áreas, la importancia relativa, los riesgos identificados, la cédula principal de cada área con cinco ejercicios —marcando las variaciones que superan la IR del área— y los ratios. Es una vista del expediente, no un papel: no lleva bloque de uso de IA | — |
 | `fsp-cumplimiento` | Valida la muestra de una prueba de cumplimiento de ForSampling contra las facturas escaneadas | Sí |
 | `fsp-mum` | Lo mismo para una prueba de muestreo por unidad monetaria | Sí |
 | `registro-ejecucion` | Escribe en el chat cómo ha ido la ejecución, para reportar incidencias | Sí |
