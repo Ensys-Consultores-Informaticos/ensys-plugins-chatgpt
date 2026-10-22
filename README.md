@@ -76,13 +76,13 @@ Gesia lleva todos.
 | `cuestionario-cuentas-anuales` | Revisa qué desgloses faltan en la memoria, leyendo las cuentas anuales en PDF | — |
 | `estados-financieros` | Balance y cuenta de resultados comparados, la conciliación de lo presentado por el cliente a lo auditado, el patrimonio neto y el estado de flujos de efectivo con sus ajustes | — |
 | `identificacion-riesgos` | Elige los riesgos del catálogo del máster conforme a la NIA-ES 315 | — |
+| `investigacion-entidad` | Investiga al cliente en fuentes públicas —BORME, contratación pública, subvenciones, jurisprudencia y prensa— con tres subagentes en paralelo, y deja un Word con cada hecho citado a su fuente | — |
 | `fsp-cumplimiento` | Valida la muestra de una prueba de cumplimiento de ForSampling contra las facturas escaneadas | Sí |
 | `fsp-mum` | Lo mismo para una prueba de muestreo por unidad monetaria | Sí |
 | `registro-ejecucion` | Escribe en el chat cómo ha ido la ejecución, para reportar incidencias | Sí |
 
-Dos procedimientos que sí están en el canal de Claude **no se distribuyen aquí**: el cuadro
-de mando del diario, pendiente de rehacerse, y la investigación de la entidad en fuentes
-públicas, que necesita subagentes y Codex no los tiene.
+La investigación de la entidad necesita que la app pueda lanzar subagentes, que es lo
+habitual en ChatGPT Desktop y Codex.
 
 **Cada papel deja constancia del uso de IA.** Lleva una hoja o un apartado «Utilización de
 herramientas de inteligencia artificial» con la herramienta y su versión, lo que se le pidió,

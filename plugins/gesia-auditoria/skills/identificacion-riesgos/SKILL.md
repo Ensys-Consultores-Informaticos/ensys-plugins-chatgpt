@@ -154,24 +154,25 @@ Si te da una cifra a mano, el informe tiene que decir que la materialidad usada 
 sale del expediente. Y si decide seguir sin ninguna, se analiza todo y **también se
 dice**: el análisis mezclará partidas materiales con las que no lo son.
 
-**El sector sale del expediente: mira `Actividad` en `DatosAuditoria`.** Es el
-campo que el auditor rellena de verdad —en un expediente real dice «Mayorista de
-pescado»—; `Sector` y `CNAE` existen pero suelen estar en blanco.
+**El sector sale del expediente.** El cuadro «Sector» de la ventana de Gesia se guarda en la
+columna **`NIF`** de `DatosAuditoria`: Gesia la reutilizó para el sector hace varias versiones
+y por dentro conserva el nombre (22/10/2026). Detrás van `Actividad` —en un expediente real
+dice «Mayorista de pescado»—, `CNAE` y `Epigrafe`:
 
 ```sql
-SELECT Actividad, CNAE, Epigrafe FROM DatosAuditoria
+SELECT NIF, Actividad, CNAE, Epigrafe FROM DatosAuditoria
 ```
 
-**Son esos tres campos y ni uno más.** La ventana de Gesia enseña un cuadro
-«Sector», pero **`Sector` no es una columna de `DatosAuditoria`**: si lo pides,
-Access lo toma por un parámetro y devuelve «No se han especificado valores para
-algunos de los parámetros requeridos», que no se parece en nada al problema real.
-Comprobado en cliente el 26/08/2026, después de que la consulta con `Sector`
-fallara en tres ejecuciones seguidas.
+**Son esos cuatro campos y ni uno más.** **`Sector` no es una columna de `DatosAuditoria`**:
+si lo pides, Access lo toma por un parámetro y devuelve «No se han especificado valores para
+algunos de los parámetros requeridos», que no se parece en nada al problema real. Comprobado
+en cliente el 26/08/2026, después de que la consulta con `Sector` fallara en tres ejecuciones
+seguidas.
 
-Usa el primero que traiga algo, en ese orden. **Los tres vacíos es un caso normal
-—pasa en expedientes reales—, y entonces se lo preguntas al usuario**; si no lo
-sabe, sigue sin filtrar por sector y dilo en el informe.
+Usa el primero que traiga algo, en ese orden —`NIF` es el sector, a pesar del nombre—, y
+dile al usuario cuál has cogido y de qué campo sale. **Los cuatro vacíos es un caso normal
+—pasa en expedientes reales—, y entonces se lo preguntas al usuario**; si no lo sabe, sigue
+sin filtrar por sector y dilo en el informe.
 
 ### Paso 2 — Avisar de lo que va a pasar
 
@@ -753,7 +754,8 @@ Lo que no vale es dejarlo en un «puede que queden temporales» sin decir dónde
   de resultados y los ratios del expediente.
 - **No usa el campo `Clasificacion`** del catálogo (I/R/A): no se sabe qué
   significa y no se muestra nada que no se pueda explicar.
-- **No detecta el sector.** Lo pregunta.
+- **No deduce el sector de las cifras.** Lo lee del expediente (el cuadro «Sector», columna
+  `NIF`, o `Actividad`) y, si no está, lo pregunta.
 - **No verifica su propio resultado por el equipo.** Propone qué contrastar; la verificación,
   quién la hace y su efecto en la conclusión los escribe el equipo en el apartado de uso de IA.
 
