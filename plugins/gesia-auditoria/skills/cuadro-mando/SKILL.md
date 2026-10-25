@@ -11,7 +11,8 @@ description: >
   cuadro de mando", "cómo vamos con este cliente" o "enséñame la cédula del área de
   compras con su variación". NO identifica riesgos nuevos (eso es identificacion-riesgos),
   no es la revisión analítica, ni la revisión de los estados financieros, ni una prueba
-  de auditoría. Requiere Gesia abierto con el servidor API arrancado.
+  de auditoría. Es para un .gs3: con un .qat o .qal de AudiQ, es manual-calidad. Requiere
+  Gesia abierto con el servidor API arrancado.
 ---
 
 # Cuadro de mando del expediente (Gesia)

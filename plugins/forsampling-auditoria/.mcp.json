@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "forsampling": {
-      "command": "./server/gesia_mcp-1.26.4.exe",
+      "command": "./server/gesia_mcp-1.27.1.exe",
       "args": [],
       "cwd": ".",
       "enabled": true,
