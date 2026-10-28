@@ -168,6 +168,12 @@ tercero; la saco del diario si me indicas dónde está el .smn del ejercicio com
 diario solo existe fuera de ForSampling —también en Excel—, puede importarlo en ForSampling,
 que lo guarda como `.smn` en esa carpeta.
 
+**Para identificar el diario no instales nada** —ni `access-parser` ni otro lector de Access, ni
+`pip install` de ningún tipo—: el diario lo mide el MCP en el equipo del auditor, y en el
+contenedor no hay nada que abrir. El 28/10/2026 una sesión instaló un lector en la máquina
+virtual para mirar un `.smn` y lo dejó instalado. Si la propuesta del MCP no basta, pregunta al
+auditor.
+
 Pásalo con `configurar(smn_file = "<ruta>")`. Si no lo tiene o no lo sabe, **sigue**: la muestra
 saldrá con tokens de reserva —los nombres no salen del equipo igual— y el papel lo hace constar.
 Y si ofrece algo que no es un `.smn` —un Excel de la contabilidad—, el MCP lo rechaza sin tocar
@@ -287,7 +293,7 @@ equipo del auditor, y a la nube solo suben esas imágenes, nunca los PDF:
 
 ```
 preparar_facturas(carpeta = "<la carpeta>",
-                  destino = "<raíz de la carpeta conectada>\\_tmp_cowork\\facturas",
+                  destino = "<raíz de la carpeta conectada>\\_tmp_cowork\\fsp-cumplimiento\\facturas",
                   modo = "tachadas" | "claras",
                   terceros = [<los tokens de tercero de la muestra exportada, sin repetir>],
                   numeros = [<los números de documento de la muestra, sin repetir>])
@@ -746,7 +752,7 @@ perfil activo, que puede haberlo cambiado la otra. `limpiar_exportaciones` borra
 parámetros y la evaluación exportados (si con un MCP anterior escribiste tú `parametros.json`
 desde `obtener_entidad`, ese no lo borra: bórralo aparte, y en una carpeta conectada puede pedir
 permiso de borrado) y, desde el MCP 1.14.3, **también las imágenes y el `manifiesto.json` que
-`preparar_facturas` dejó en `_tmp_cowork\facturas`** (con un MCP anterior quedan ahí: dilo al
+`preparar_facturas` dejó en `_tmp_cowork\fsp-cumplimiento\facturas`** (con un MCP anterior quedan ahí: dilo al
 auditor con la ruta, y en este canal bórralas tú, que compartes disco con el auditor). `facturas.json` y `roles.json`
 los escribiste tú: van con el directorio de trabajo. Los PDF no se copian a ningún sitio.
 
