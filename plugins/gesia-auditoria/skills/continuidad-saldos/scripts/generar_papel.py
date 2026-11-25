@@ -207,10 +207,20 @@ def _uso_ia(wb: Workbook, args, datos: dict) -> None:
     """La hoja de evidencia del uso de IA, la primera del libro (lib_uso_ia)."""
     meta, cuadre = datos["meta"], datos.get("cuadre", {})
     n_hall = len(datos["hallazgos"])
+    if meta.get("via_apertura") == "campo":
+        # plantilla del campo de apertura, sin filtro (25/11/2026)
+        identificada = (
+            "Asiento de apertura identificado por el campo APERTURA del diario, que es como lo "
+            "marca la plantilla de normalización con campo de apertura (no hay filtro de "
+            "apertura), no supuesto: " + str(meta.get("apuntes_apertura", 0)) + " apuntes, "
+            "con el campo APERTURA igual a Debe − Haber en todos ellos.")
+    else:
+        identificada = (
+            "Asiento de apertura identificado por el filtro de normalización del diario ("
+            + str(meta.get("filtro_apertura", "")).split("|||")[0].replace("|", " ").strip()
+            + "), no supuesto: " + str(meta.get("apuntes_apertura", 0)) + " apuntes.")
     comprobaciones = [
-        "Asiento de apertura identificado por el filtro de normalización del diario ("
-        + str(meta.get("filtro_apertura", "")).split("|||")[0].replace("|", " ").strip()
-        + "), no supuesto: " + str(meta.get("apuntes_apertura", 0)) + " apuntes.",
+        identificada,
         "La apertura de balance suma " + _euro(cuadre.get("descuadre_apertura_balance", 0))
         + (" (cuadra a cero)." if abs(cuadre.get("descuadre_apertura_balance", 0)) < 0.005
            else "; lo explicado por cuentas de resultados y no reconocidas: "

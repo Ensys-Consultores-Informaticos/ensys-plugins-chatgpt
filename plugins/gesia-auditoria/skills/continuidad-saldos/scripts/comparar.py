@@ -21,6 +21,7 @@ from lib_continuidad import (  # noqa: E402
     DECIMALES,
     GRUPOS_BALANCE,
     cargar_apertura,
+    describir_apertura,
     leer_cierre,
     leer_filtro,
     mapear_a_maximo_nivel,
@@ -115,8 +116,20 @@ def main() -> int:
     df = cargar_apertura(args.apertura)
     mascara = df["POR_FILTRO"]
     if not mascara.any():
-        print("El filtro de apertura no selecciona ningun apunte.")
+        print("La apertura (" + describir_apertura(filtro) + ") no selecciona ningun apunte.")
         return 2
+    # Por el campo APERTURA, el saldo se toma de DEBE - HABER porque ForSampling mete ahi la
+    # apertura; si no coinciden, el papel diria una apertura que no es la del campo. Lo para
+    # verificar_contrato (C06) y se repite aqui para que el papel no dependa de haberlo pasado.
+    if filtro.get("via") == "campo":
+        if "APERTURA" not in df.columns:
+            print("La apertura exportada no trae la columna APERTURA.")
+            return 2
+        sel = df[mascara]
+        if ((sel["APERTURA"] - (sel["DEBE"] - sel["HABER"]).round(DECIMALES)).abs() > UMBRAL).any():
+            print("El campo APERTURA no coincide con DEBE - HABER en la apertura: pasa antes "
+                  "verificar_contrato.py, que dice donde.")
+            return 2
 
     cierre = leer_cierre(args.cierre, args.ejercicio, args.ejercicio_anterior,
                              args.cliente)
@@ -238,6 +251,9 @@ def main() -> int:
             "ejercicio": cierre["ejercicio"],
             "ejercicio_anterior": cierre["ejercicio_anterior"],
             "filtro_apertura": filtro["crudo"],
+            # «filtro» o «campo»: el papel dice por cual se identifico la apertura
+            "via_apertura": filtro.get("via", "filtro"),
+            "descripcion_apertura": describir_apertura(filtro),
             "apuntes_apertura": int(mascara.sum()),
             "asientos_apertura": sorted(
                 df.loc[mascara, "ASIENTO"].drop_duplicates().tolist()
@@ -270,7 +286,7 @@ def main() -> int:
     m = resultado["meta"]
     print("Escrito: " + args.salida)
     print("  apertura   " + str(m["apuntes_apertura"]) + " apuntes, asiento(s) "
-          + str(m["asientos_apertura"][:5]))
+          + str(m["asientos_apertura"][:5]) + ", por " + m["descripcion_apertura"])
     print("  cuentas    " + str(m["cuentas_papel"]) + " en el papel ("
           + str(m["cuentas_cierre"]) + " del cierre, " + str(m["cuentas_apertura"])
           + " con apertura)")

@@ -24,6 +24,7 @@ from lib_continuidad import (  # noqa: E402
     DECIMALES,
     GRUPOS_BALANCE,
     cargar_apertura,
+    describir_apertura,
     leer_cierre,
     leer_filtro,
     saldos_apertura,
@@ -34,6 +35,11 @@ from lib_continuidad import (  # noqa: E402
 # euro fijado en cliente; se deja un margen de un centimo por cuenta agregada, no
 # un porcentaje: un descuadre real en un asiento de apertura no es proporcional.
 TOLERANCIA = 0.01
+
+# Tolerancia por LINEA al cruzar el campo APERTURA con DEBE - HABER: los dos llegan
+# redondeados a 2 decimales, asi que cualquier resto por encima de medio centimo es una
+# diferencia real y no coma flotante.
+TOLERANCIA_LINEA = 0.005
 
 COLUMNAS_MINIMAS = ("CUENTA", "ASIENTO", "DEBE", "HABER", "POR_FILTRO")
 
@@ -66,14 +72,19 @@ def main() -> int:
         errores.append("C01 · a la apertura exportada le faltan columnas: " + str(faltan)
                        + ". Exportala con la consulta que da consulta_apertura.py, tal cual.")
 
-    # C02 · el filtro de apertura se lee y se entiende
+    # C02 · la apertura se puede identificar: por el filtro o por el campo APERTURA
     filtro = leer_filtro(args.filtro)
     if filtro.get("ausente"):
         errores.append(
             "C02 · no se puede identificar el asiento de apertura: "
             + filtro["motivo"]
-            + ". El asiento de apertura se fija al normalizar y no tiene que ser "
-            "el 1, asi que no se puede suponer."
+            + ". No se supone: el asiento de apertura no tiene que ser el 1."
+        )
+    elif filtro.get("via") == "campo" and "APERTURA" not in df.columns:
+        errores.append(
+            "C02 · el diario se normalizo con la plantilla del campo de apertura y la "
+            "apertura exportada no trae la columna APERTURA. Exportala con la consulta "
+            "que da consulta_apertura.py, tal cual."
         )
 
     if errores:
@@ -82,14 +93,15 @@ def main() -> int:
         print("\nNo se puede hacer la prueba.")
         return 2
 
-    print("C02 · filtro de apertura: " + filtro["campo"] + " " + filtro["operador"]
-          + " " + repr(filtro["valor"]))
+    print("C02 · apertura por " + describir_apertura(filtro))
 
     # C03 · el filtro selecciona algo (lo evaluo JET al exportar: POR_FILTRO)
     mascara = df["POR_FILTRO"]
     n = int(mascara.sum())
     if n == 0:
-        print("C03 ERROR: el filtro de apertura no selecciona ningun apunte.")
+        print("C03 ERROR: " + ("ningun apunte tiene el campo APERTURA distinto de cero."
+                               if filtro.get("via") == "campo"
+                               else "el filtro de apertura no selecciona ningun apunte."))
         return 2
     asientos = sorted(df.loc[mascara, "ASIENTO"].drop_duplicates().tolist())
     print("C03 · " + str(n) + " apuntes de apertura, asiento(s) " + str(asientos[:5])
@@ -118,10 +130,37 @@ def main() -> int:
             "diferencia que cuantificar."
         )
 
+    # C06 · por el campo APERTURA (plantilla del campo de apertura, sin filtro) no hay
+    # filtro con el que cruzarlo, pero si lo que la prueba asume: que ForSampling metio
+    # la apertura en DEBE y HABER, y que APERTURA es su importe neto. Medido el 25/11/2026
+    # en las 242 lineas de apertura del diario de prueba. Si no coincide, el saldo que la
+    # prueba toma (DEBE - HABER) no es la apertura, y se para.
+    if filtro.get("via") == "campo":
+        neto_linea = (ap["DEBE"] - ap["HABER"]).round(DECIMALES)
+        distintas = ap[(ap["APERTURA"] - neto_linea).abs() > TOLERANCIA_LINEA]
+        if len(distintas):
+            errores.append(
+                "C06 · en " + str(len(distintas)) + " de " + str(len(ap)) + " apuntes de "
+                "apertura el campo APERTURA no coincide con DEBE - HABER (cuentas "
+                + str(sorted(distintas["CUENTA"].drop_duplicates().tolist())[:5]) + "). "
+                "La prueba lee la apertura de DEBE y HABER, y con este diario no seria la "
+                "del campo APERTURA: no se puede hacer."
+            )
+        else:
+            print("C06 · el campo APERTURA coincide con DEBE - HABER en los " + str(len(ap))
+                  + " apuntes de apertura")
+        # la apertura es un asiento: repartida en varios asientos o fechas, hay que mirarla
+        fechas = ap["FECHA"].drop_duplicates().tolist() if "FECHA" in ap.columns else []
+        if len(asientos) > 1 or len(fechas) > 1:
+            avisos.append(
+                "C06 · las lineas con APERTURA distinto de cero estan repartidas en "
+                + str(len(asientos)) + " asiento(s) y " + str(len(fechas)) + " fecha(s). "
+                "La apertura es un asiento: revisa que todas lo sean antes de firmar."
+            )
     # C06 · si el campo APERTURA viene relleno, tiene que decir lo mismo que el filtro.
     # La exportacion trae justo la union de los dos -lo que el filtro selecciona y lo que
     # APERTURA marca-, que es todo lo que esta comprobacion necesita del diario.
-    if "APERTURA" in df.columns and (df["APERTURA"] != 0).any():
+    elif "APERTURA" in df.columns and (df["APERTURA"] != 0).any():
         por_campo = set(df.index[df["APERTURA"] != 0])
         por_filtro = set(df.index[mascara])
         if por_campo != por_filtro:

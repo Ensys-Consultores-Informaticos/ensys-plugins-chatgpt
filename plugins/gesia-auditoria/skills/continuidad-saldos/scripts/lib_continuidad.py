@@ -7,10 +7,16 @@ comprimia el .smn y lo subia al contenedor de Cowork para leerlo con mdbtools: t
 tablas y columnas, nombres y conceptos incluidos, para usar un solo asiento. Ahora el MCP
 exporta dos cosas pequenas y nada mas:
 
-  1. el FiltroDeApertura (campo Datos de CfgNormalizacion), con SQL_FILTRO;
-  2. el asiento de apertura, con la consulta que arma sql_apertura() a partir de ese
-     filtro: solo las columnas que la prueba usa, el filtro evaluado en JET como
-     POR_FILTRO, y los nombres de terceros seudonimizados por el perfil.
+  1. la configuracion de normalizacion (campo Datos de CfgNormalizacion), con SQL_FILTRO:
+     el FiltroDeApertura y la plantilla de campos con que se normalizo el diario;
+  2. el asiento de apertura, con la consulta que arma sql_apertura() a partir de eso:
+     solo las columnas que la prueba usa, el filtro evaluado en JET como POR_FILTRO,
+     y los nombres de terceros seudonimizados por el perfil.
+
+La apertura se identifica de una de dos maneras, y ninguna se adivina (25/11/2026):
+  - por el FiltroDeApertura que el auditor definio al normalizar, o
+  - si no hay filtro y el diario se normalizo con la plantilla que trae el campo
+    APERTURA, por ese campo: la apertura son las lineas con APERTURA <> 0.
 
 Es la minimizacion del dato: a la herramienta solo va lo que el procedimiento necesita.
 El expediente (.gs3) llega igual que siempre, en el JSON que exporta el MCP.
@@ -36,21 +42,67 @@ DECIMALES = 2
 GRUPOS_BALANCE = ("1", "2", "3", "4", "5")
 
 # Operadores del FiltroDeApertura que este skill sabe traducir. La notacion la
-# genera el modulo .NET de importacion de Gesia (ForSampling) y no esta
-# especificada, asi que ante un operador desconocido se ABORTA en vez de
-# adivinar: interpretar mal el filtro selecciona el asiento equivocado y el
-# resultado sale plausible y falso.
+# genera el modulo .NET de importacion de Gesia (ForSampling): los nombres son los
+# del codigo que traduce el filtro en GesiaIA, portado de ese importador. Ante un
+# operador desconocido se ABORTA en vez de adivinar: interpretar mal el filtro
+# selecciona el asiento equivocado y el resultado sale plausible y falso.
+#
+# Medido el 28/10/2026 en 391 diarios reales: los 112 que traen filtro usan
+# «Es igual a» o «Comienza por», todos de tipo Texto y de una sola fila. Los
+# nombres anteriores («es distinto de», «empieza por», «termina por») no los
+# genera Gesia; se quedan como sinonimos para no romper nada.
 OPERADORES = {
     "es igual a": "==",
-    "es distinto de": "!=",
+    "es distinto a": "!=",
+    "comienza por": "empieza",
     "contiene": "contiene",
+    "finaliza por": "termina",
+    "no contiene": "no_contiene",
+    # sinonimos anteriores
+    "es distinto de": "!=",
     "empieza por": "empieza",
     "termina por": "termina",
 }
 
-# El filtro vive en CfgNormalizacion, en el registro cuyo Concepto es FiltroDeApertura.
-# Solo se pide Datos: Concepto se llama como la columna del diario que el MCP retiene.
-SQL_FILTRO = "SELECT Datos FROM CfgNormalizacion WHERE Trim(Concepto) = 'FiltroDeApertura'"
+# Operadores que Gesia SI genera y este skill NO traduce: se para diciendo cual es.
+# Ninguno aparece en los 391 diarios medidos, y traducirlos exige decidir como se
+# comparan numeros, fechas y booleanos, que aqui se comparan como texto.
+NO_SOPORTADOS = {
+    "rango": "compara entre Valor1 y Valor2, y aqui el campo se compara como texto",
+    "es": "compara un campo Verdadero/Falso",
+}
+
+# En Gesia, cualquier otro texto en la casilla del operador va tal cual a la consulta
+# como comparador (>, <, >=...). Se para igual, pero diciendo que es eso.
+COMPARADORES = (">", "<", ">=", "<=", "=", "<>")
+
+# Valor1 = «<nulo>» es campo vacio (IS NULL / IS NOT NULL). En GesiaIA no se traduce
+# igual en todos los operadores, asi que no hay una semantica que copiar: se para.
+VALOR_NULO = "<nulo>"
+
+# El filtro vive en CfgNormalizacion, en el registro cuyo Concepto es FiltroDeApertura, y
+# la plantilla con que se normalizo el diario en el registro «Configuracion de campos».
+# Las dos cosas van en la misma consulta y solo se pide Datos: Concepto se llama como la
+# columna del diario que el MCP retiene, y el MCP quita del fichero toda columna que no
+# este en la lista blanca del perfil. Las filas se distinguen por la forma de Datos: el
+# filtro es CAMPO|Tipo|Operador|..., la plantilla un numero. El acento de «Configuracion»
+# se esquiva con el comodin. No se filtra por TipoNormalizacion: hay .smn antiguos sin esa
+# columna, y la consulta fallaria donde la de solo el filtro funcionaba (medido el 25/11/2026).
+SQL_FILTRO = ("SELECT Datos FROM CfgNormalizacion WHERE Trim(Concepto) = 'FiltroDeApertura' "
+              "OR Concepto LIKE 'Configuraci%campos'")
+
+# Las plantillas de ForSampling para normalizar un diario («Configuracion de campos»).
+# Medido el 25/11/2026: 242 diarios reales con la 0 y 6 con la 1, y un diario de la 2
+# hecho para la prueba. En la 2 no hay FiltroDeApertura, y ForSampling construye las
+# columnas asi, en el 100 % de las lineas:
+#     DEBE = DEBESA + max(APERTURA, 0)      HABER = HABERSA + max(-APERTURA, 0)
+# es decir, DEBE y HABER SI llevan la apertura, y APERTURA es su importe neto con signo.
+PLANTILLAS = {
+    "0": "DEBE y HABER",
+    "1": "SALDO",
+    "2": "campo de APERTURA",
+}
+PLANTILLA_CAMPO_APERTURA = "2"
 
 # Las columnas del diario que la prueba usa. Ni CONCEPTO ni ninguna otra.
 COLUMNAS_APERTURA = ("FECHA", "ASIENTO", "CUENTA", "NOMBRE", "DEBE", "HABER")
@@ -64,85 +116,180 @@ def salida_utf8() -> None:
             f.reconfigure(encoding="utf-8")
 
 
+def _no_se_traduce(crudo: str, motivo: str) -> dict:
+    return {"ausente": True, "motivo": motivo + ". Se para en vez de adivinar.", "crudo": crudo}
+
+
 def interpretar_filtro(crudo: str) -> dict:
     """Traduce el texto del FiltroDeApertura.
 
     El asiento de apertura se fija al normalizar el diario y NO tiene que ser el
     numero 1: en el expediente de calibracion era el 3495. El filtro tiene esta forma:
 
-        CAMPO|Tipo|Operador|Valor||| descripcion legible
+        CAMPO|Tipo|Operador|Valor1|Valor2|Comparacion| descripcion legible
 
-    Medido en un expediente real:  CONCEPTO|Texto|Es igual a|Apertura|||...
+    Medido en expedientes reales:  CONCEPTO|Texto|Es igual a|Apertura|||...
+                                   CONCEPTO|Texto|Comienza por|Apertura|||...
     El ejemplo de partida era por ASIENTO, asi que el campo, el operador y el
     valor son todos variables y hay que leerlos, no suponerlos.
+
+    Comparacion (Y/O) encadena con la fila siguiente: un filtro de varias
+    condiciones no se traduce, y leer_filtro ya para si hay mas de una fila.
 
     Devuelve {campo, tipo, operador, valor, crudo}, o {ausente: True, motivo}.
     """
     partes = str(crudo or "").split("|")
     if len(partes) < 4:
         return {"ausente": True, "motivo": "filtro ilegible: " + repr(crudo)}
-    operador = partes[2].strip().lower()
+    original = partes[2].strip()
+    operador = original.lower()
     if operador not in OPERADORES:
-        return {
-            "ausente": True,
-            "motivo": (
-                "operador no soportado: " + repr(partes[2]) + ". Los conocidos son "
-                + str(sorted(OPERADORES)) + ". Se para en vez de adivinar."
-            ),
-            "crudo": crudo,
-        }
+        if operador in NO_SOPORTADOS:
+            return _no_se_traduce(crudo, "operador " + repr(original) + " no soportado: "
+                                  + NO_SOPORTADOS[operador])
+        if operador in COMPARADORES:
+            return _no_se_traduce(crudo, "operador " + repr(original) + " no soportado: es un "
+                                  "comparador, y aqui el campo se compara como texto")
+        return _no_se_traduce(crudo, "operador no soportado: " + repr(partes[2])
+                              + ". Los conocidos son " + str(sorted(OPERADORES)))
+    tipo = partes[1].strip()
+    if tipo.lower() == "fecha":
+        return _no_se_traduce(crudo, "filtro sobre un campo de tipo Fecha, y aqui el campo se "
+                              "compara como texto")
+    valor = partes[3].strip()
+    if valor.lower() == VALOR_NULO:
+        return _no_se_traduce(crudo, "filtro por campo vacio (" + VALOR_NULO + ")")
+    if len(partes) > 5 and partes[5].strip():
+        return _no_se_traduce(crudo, "el filtro encadena otra condicion (Comparacion = "
+                              + repr(partes[5].strip()) + ") y solo se traduce una")
     campo = partes[0].strip()
     # el campo va a parar a una consulta: solo un nombre de columna, nada mas
     if not campo.replace("_", "").isalnum():
         return {"ausente": True, "motivo": "campo de filtro raro: " + repr(campo), "crudo": crudo}
     return {
         "campo": campo,
-        "tipo": partes[1].strip(),
+        "tipo": tipo,
         "operador": operador,
-        "valor": partes[3].strip(),
+        "valor": valor,
         "crudo": crudo,
     }
 
 
+def _sin_filtro(plantilla) -> dict:
+    """Sin FiltroDeApertura ni plantilla del campo de apertura: no hay forma de saber cual es
+    el asiento de apertura, y se dice como se arregla. 130 de los 248 diarios medidos el
+    25/11/2026 estan asi: normalizados con DEBE y HABER y sin filtro."""
+    if plantilla is None:
+        motivo = "CfgNormalizacion no tiene FiltroDeApertura"
+    elif plantilla in PLANTILLAS:
+        motivo = ("el diario se normalizo con la plantilla de " + PLANTILLAS[plantilla]
+                  + " y sin filtro de apertura")
+    else:
+        motivo = ("el diario se normalizo con una plantilla desconocida (" + repr(plantilla)
+                  + ") y sin filtro de apertura")
+    return {"ausente": True, "plantilla": plantilla,
+            "motivo": motivo + ". La apertura se define al normalizar el diario: con un filtro "
+                      "de apertura, o con la plantilla que trae el campo APERTURA. Hay que "
+                      "definirla y volver a importar el diario"}
+
+
 def leer_filtro(ruta) -> dict:
-    """Lee el FiltroDeApertura del fichero que deja exportar_consulta con SQL_FILTRO."""
+    """Lee como se identifica la apertura, del fichero que deja exportar_consulta con SQL_FILTRO.
+
+    Devuelve el filtro traducido (via «filtro»), la identificacion por el campo APERTURA
+    (via «campo») si no hay filtro y la plantilla es la que trae ese campo, o {ausente,
+    motivo}. Si hay filtro manda el filtro, sea cual sea la plantilla: es lo que el auditor
+    definio expresamente, y C06 lo cruza con el campo APERTURA."""
     try:
         filas = json.loads(Path(ruta).read_text(encoding="utf-8"))
     except (OSError, ValueError) as exc:
         return {"ausente": True, "motivo": "no se puede leer el filtro exportado: " + str(exc)}
     if not isinstance(filas, list):
         return {"ausente": True, "motivo": "el fichero del filtro no es una lista de filas"}
-    if not filas:
-        return {"ausente": True, "motivo": "CfgNormalizacion no tiene FiltroDeApertura"}
-    if len(filas) > 1:
-        return {"ausente": True,
-                "motivo": "hay " + str(len(filas)) + " FiltroDeApertura, se esperaba 1"}
-    clave = next((k for k in filas[0] if str(k).lower() == "datos"), None)
-    if clave is None:
-        return {"ausente": True, "motivo": "la fila del filtro no trae la columna Datos"}
-    return interpretar_filtro(filas[0][clave])
+    datos = []
+    for fila in filas:
+        clave = next((k for k in fila if str(k).lower() == "datos"), None) if isinstance(fila, dict) else None
+        if clave is None:
+            return {"ausente": True, "motivo": "la fila del filtro no trae la columna Datos"}
+        datos.append(str(fila[clave] if fila[clave] is not None else "").strip())
+    # la plantilla es un numero y el FiltroDeApertura va con barras (CAMPO|Tipo|...). Lo que
+    # no es ninguna de las dos es una configuracion de otro formato: un .smn antiguo guarda
+    # en «Configuracion de campos» la lista de campos (medido el 25/11/2026, uno de 391)
+    plantillas = sorted({d for d in datos if d.isdigit()})
+    filtros = [d for d in datos if "|" in d]
+    otras = [d for d in datos if not d.isdigit() and "|" not in d]
+    plantilla = plantillas[0] if len(plantillas) == 1 else None
+    if len(filtros) > 1:
+        return {"ausente": True, "plantilla": plantilla,
+                "motivo": "hay " + str(len(filtros)) + " FiltroDeApertura: es un filtro de "
+                          "varias condiciones encadenadas con Y/O, y solo se traduce una. "
+                          "Se para en vez de adivinar."}
+    if filtros:
+        filtro = interpretar_filtro(filtros[0])
+        filtro["plantilla"] = plantilla
+        if not filtro.get("ausente"):
+            filtro["via"] = "filtro"
+        return filtro
+    if len(plantillas) > 1:
+        # en un .smn conviven normalizaciones de varios tipos (diario, bancos...) y la consulta
+        # no las separa: 0 de 248 diarios medidos trae dos, pero si llega no se elige una
+        return {"ausente": True, "plantilla": None,
+                "motivo": "la configuracion trae " + str(len(plantillas)) + " plantillas de "
+                          "normalizacion (" + ", ".join(plantillas) + ") y ningun filtro de "
+                          "apertura: no se sabe cual es la del diario. Se para en vez de adivinar."}
+    if plantilla == PLANTILLA_CAMPO_APERTURA:
+        return {"via": "campo", "campo": "APERTURA", "plantilla": plantilla,
+                "crudo": "APERTURA <> 0 (plantilla con campo de apertura, sin FiltroDeApertura)"}
+    if plantilla is None and otras:
+        return _sin_filtro(otras[0][:60])
+    return _sin_filtro(plantilla)
+
+
+def describir_apertura(filtro: dict) -> str:
+    """Como se ha identificado la apertura, en una linea legible para la pantalla y el papel."""
+    if filtro.get("via") == "campo":
+        return ("campo APERTURA distinto de cero (el diario se normalizo con la plantilla "
+                "del campo de apertura, sin filtro)")
+    return "filtro " + filtro["campo"] + " " + filtro["operador"] + " " + repr(filtro["valor"])
 
 
 def condicion_jet(filtro: dict) -> str:
     """El filtro como condicion de JET, con la misma semantica que aplicar_filtro():
-    texto sin espacios a los lados y sin distinguir mayusculas; un nulo es texto vacio."""
+    texto sin espacios a los lados y sin distinguir mayusculas; un nulo es texto vacio.
+
+    Salvo en los negativos («Es distinto a», «No contiene»): ahi un nulo queda FUERA,
+    como en Gesia, que pasa el filtro a JET sin IIf, y alli NULL <> 'x' no es verdadero.
+    Como texto vacio entraria en la apertura todo apunte que no tenga ese campo."""
     campo = "[" + filtro["campo"] + "]"
     col = "LCase(Trim(IIf(IsNull(" + campo + "), '', " + campo + ")))"
     valor = filtro["valor"].lower().replace("'", "''")
     op = OPERADORES[filtro["operador"]]
-    if op in ("==", "!="):
-        return col + (" = " if op == "==" else " <> ") + "'" + valor + "'"
+    if op == "==":
+        return col + " = '" + valor + "'"
+    if op == "!=":
+        return "(" + campo + " IS NOT NULL AND " + col + " <> '" + valor + "')"
     # en LIKE, % y _ son comodines: el valor se escapa entre corchetes
     lit = valor.replace("[", "[[]").replace("%", "[%]").replace("_", "[_]")
+    if op == "no_contiene":
+        return "(" + campo + " IS NOT NULL AND " + col + " NOT LIKE '%" + lit + "%')"
     patron = {"contiene": "%" + lit + "%", "empieza": lit + "%", "termina": "%" + lit}[op]
     return col + " LIKE '" + patron + "'"
 
 
 def sql_apertura(filtro: dict, con_campo_apertura: bool = True) -> str:
     """La consulta del asiento de apertura: lo que el filtro selecciona y, si el diario
-    trae el campo APERTURA, tambien lo que ese campo marca, para la comprobacion C06."""
-    cond = condicion_jet(filtro)
+    trae el campo APERTURA, tambien lo que ese campo marca, para la comprobacion C06.
+
+    Por el campo (plantilla del campo de apertura, sin filtro) son las lineas con
+    APERTURA <> 0, todas con POR_FILTRO = 1. Sin la columna no hay apertura que leer."""
     cols = ", ".join(COLUMNAS_APERTURA)
+    if filtro.get("via") == "campo":
+        if not con_campo_apertura:
+            raise RuntimeError(
+                "el diario se normalizo con la plantilla del campo de apertura y no trae la "
+                "columna APERTURA: no hay de donde leer la apertura")
+        return "SELECT " + cols + ", APERTURA, 1 AS POR_FILTRO FROM Diario WHERE APERTURA <> 0"
+    cond = condicion_jet(filtro)
     if con_campo_apertura:
         return ("SELECT " + cols + ", APERTURA, IIf(" + cond + ", 1, 0) AS POR_FILTRO "
                 "FROM Diario WHERE (" + cond + ") OR (APERTURA <> 0)")
@@ -185,15 +332,18 @@ def aplicar_filtro(df: pd.DataFrame, filtro: dict) -> pd.Series:
             "el filtro de apertura usa el campo " + repr(campo) + ", que no existe "
             "en el diario. Columnas: " + str(sorted(df.columns))
         )
+    nulo = df[campo].isna()
     col = df[campo].fillna("").astype(str).str.strip().str.lower()
     valor = filtro["valor"].lower()
     op = OPERADORES[filtro["operador"]]
     if op == "==":
         return col == valor
     if op == "!=":
-        return col != valor
+        return ~nulo & (col != valor)
     if op == "contiene":
         return col.str.contains(valor, regex=False)
+    if op == "no_contiene":
+        return ~nulo & ~col.str.contains(valor, regex=False)
     if op == "empieza":
         return col.str.startswith(valor)
     return col.str.endswith(valor)
@@ -203,8 +353,9 @@ def saldos_apertura(df: pd.DataFrame, mascara: pd.Series) -> pd.DataFrame:
     """Saldo de apertura por cuenta del cliente, al maximo desglose del diario.
 
     El saldo es DEBE - HABER, no el campo APERTURA: APERTURA es una opcion de
-    importacion y puede venir vacia, mientras que DEBE y HABER estan siempre.
-    Cuando APERTURA si viene, verificar_contrato comprueba que ambos coinciden.
+    importacion y puede venir vacia, mientras que DEBE y HABER estan siempre. Con la
+    plantilla del campo de apertura tambien: ForSampling mete la apertura en DEBE y
+    HABER (medido el 25/11/2026), y verificar_contrato (C06) para si no coinciden.
     """
     ap = df[mascara].copy()
     ap["SALDO_AP"] = (ap["DEBE"] - ap["HABER"]).round(DECIMALES)

@@ -1,7 +1,8 @@
 """Comprueba que el comparador detecta lo que tiene que detectar, y que el papel
 lleva el bloque de uso de IA como debe.
 
-    python probar_hallazgos.py --diario "<real.smn>" --cierre cierre.json
+    python probar_hallazgos.py --diario "<real.smn>" --cierre cierre.json \
+        [--diario-campo "<real.smn de la plantilla del campo de apertura>"]
 
 Parte de un diario REAL, hace una copia y le mete tres casos a proposito:
 
@@ -20,11 +21,24 @@ MISMAS consultas (SQL_FILTRO y sql_apertura) por ODBC, como haria el MCP, y adem
 comprueba sobre el diario real entero que la condicion traducida a JET selecciona
 exactamente lo mismo que el filtro evaluado en pandas, que es como se hacia antes.
 
+Y el filtro (28/10/2026): cada FiltroDeApertura de la lista se traduce o para con su motivo,
+y cada operador de Gesia selecciona lo mismo en JET y en pandas sobre una copia del diario
+real con un apunte sin el campo del filtro, que es donde se ve si los negativos dejan fuera
+los nulos.
+
 Sigue exigiendo un .smn real, igual que el resto de las pruebas del proyecto.
 Un fixture sintetico desde cero esta pendiente (fase 3). El primer trozo ya esta: las
 diferencias que se compensan (tanda del 21/10/2026) se prueban con filtro, apertura y
 cierre sinteticos -dos parejas y un grupo ambiguo- por comparar.py y generar_papel.py.
 Y al final se mira el SKILL.md: huecos en vez de años fijos y el borrado con ruta literal.
+
+La plantilla del campo de apertura (25/11/2026): un diario normalizado con CUENTA, NOMBRE,
+APERTURA, DEBESA, HABERSA... no trae FiltroDeApertura, y el skill se paraba. Se prueba
+como se lee la configuracion (filtro, plantilla, o ninguna de las dos y por que), un caso
+sintetico de punta a punta -incluidos un APERTURA que no casa con DEBE - HABER y una
+apertura repartida en dos fechas- y, con --diario-campo, la calibracion contra un diario
+real de esa plantilla: la apertura por el campo tiene que dar, cuenta a cuenta, lo mismo
+que un filtro por su asiento sobre el mismo diario.
 """
 
 from __future__ import annotations
@@ -168,6 +182,85 @@ COLUMNA_G_ESPERADA = {"400": "con 570", "570": "con 400", "430": "con 431", "431
                       "523": "ambigua: con 520 o 521"}
 
 
+# Los operadores tal como los escribe Gesia en el FiltroDeApertura (los del codigo que lo
+# traduce en GesiaIA), y lo que tiene que pasar con cada filtro. «ok» se traduce; si no,
+# un trozo del motivo con que para. Revision del 28/10/2026: el skill solo conocia
+# nombres que Gesia no genera, y con un «Comienza por» real se paraba.
+FILTROS = [
+    ("CONCEPTO|Texto|Es igual a|Apertura|||", "ok"),
+    ("CONCEPTO|Texto|Comienza por|Apertura||| CONCEPTO Comienza por Apertura", "ok"),
+    ("CONCEPTO|Texto|Es distinto a|Apertura|||", "ok"),
+    ("CONCEPTO|Texto|Contiene|Apertura|||", "ok"),
+    ("CONCEPTO|Texto|Finaliza por|Apertura|||", "ok"),
+    ("CONCEPTO|Texto|No contiene|Apertura|||", "ok"),
+    ("ASIENTO|Numero|Es igual a|1|||", "ok"),
+    ("CONCEPTO|Texto|empieza por|Apertura|||", "ok"),
+    ("ASIENTO|Numero|Rango|1|5||", "'Rango' no soportado"),
+    ("PUNTEADO|Booleano|Es|Verdadero|||", "'Es' no soportado"),
+    ("ASIENTO|Numero|>=|1|||", "es un comparador"),
+    ("CONCEPTO|Texto|Es igual a|<nulo>|||", "campo vacio"),
+    ("FECHA|Fecha|Es igual a|01/01/2025|||", "tipo Fecha"),
+    ("CONCEPTO|Texto|Comienza por|Apertura||Y|", "encadena otra condicion"),
+    ("CONCEPTO|Texto|Se parece a|Apertura|||", "operador no soportado"),
+]
+
+# Los seis nombres de Gesia que se traducen: sobre el diario real, cada uno tiene que
+# seleccionar en JET lo mismo que en pandas, nulos incluidos. El segundo valor lleva los
+# dos comodines de LIKE, que tienen que buscarse como texto.
+OPERADORES_GESIA = ("Es igual a", "Es distinto a", "Comienza por", "Contiene", "Finaliza por",
+                    "No contiene")
+
+
+def _probar_filtros(comprobar) -> None:
+    """interpretar_filtro: los nombres de Gesia se leen, y lo que no se traduce para con motivo."""
+    from lib_continuidad import condicion_jet, interpretar_filtro
+
+    for crudo, esperado in FILTROS:
+        f = interpretar_filtro(crudo)
+        if esperado == "ok":
+            comprobar("filtro " + repr(crudo.split("|")[2]) + " se traduce: "
+                      + (f.get("motivo") or condicion_jet(f)), not f.get("ausente"))
+        else:
+            comprobar("filtro " + repr(crudo) + " para: " + str(f.get("motivo")),
+                      bool(f.get("ausente")) and esperado in str(f.get("motivo"))
+                      and "Se para en vez de adivinar" in str(f.get("motivo")))
+
+
+def _probar_operadores(real: Path, trabajo: Path, filtro: dict, comprobar) -> None:
+    """Cada operador de Gesia, con el campo y el valor del filtro real, sobre una copia del
+    diario real con un apunte de mas que no lleva ese campo: los diarios medidos no traen
+    ninguno, y sin el los negativos no prueban que dejan fuera los nulos."""
+    import pandas as pd
+    import pyodbc
+
+    from lib_continuidad import aplicar_filtro, condicion_jet, interpretar_filtro
+
+    copia = trabajo / "nulos.smn"
+    shutil.copy2(real, copia)
+    con = pyodbc.connect("DRIVER={Microsoft Access Driver (*.mdb, *.accdb)};DBQ=" + str(copia) + ";")
+    columnas = [c for c in ("FECHA", "ASIENTO", "CUENTA", "DEBE", "HABER") if c != filtro["campo"].upper()]
+    valores = {"FECHA": "2025-01-01", "ASIENTO": 999999, "CUENTA": "570000000", "DEBE": 0.0, "HABER": 0.0}
+    con.cursor().execute("INSERT INTO Diario (" + ", ".join(columnas) + ") VALUES ("
+                         + ", ".join("?" for _ in columnas) + ")", *[valores[c] for c in columnas])
+    con.commit()
+    con.close()
+    diario = pd.DataFrame(consultar(copia, "SELECT * FROM Diario"))
+    comprobar("la copia lleva un apunte sin " + filtro["campo"],
+              int(diario[filtro["campo"]].isna().sum()) >= 1)
+
+    for nombre in OPERADORES_GESIA:
+        for valor in (filtro["valor"], "a%b_"):
+            f = interpretar_filtro("|".join([filtro["campo"], filtro["tipo"], nombre, valor, "", "", ""]))
+            mascara = aplicar_filtro(diario, f)
+            n_jet = int(consultar(copia, "SELECT Count(*) AS N FROM Diario WHERE "
+                                  + condicion_jet(f))[0]["N"])
+            comprobar("operador " + repr(nombre) + " " + repr(valor) + ": JET y pandas seleccionan "
+                      + str(n_jet) + " y " + str(int(mascara.sum())), n_jet == int(mascara.sum()))
+            if nombre in ("Es distinto a", "No contiene"):
+                comprobar("y deja fuera el apunte sin " + filtro["campo"] + ", como Gesia",
+                          not mascara[diario[filtro["campo"]].isna()].any())
+
+
 def _probar_compensadas(aqui: Path, trabajo: Path, comprobar) -> None:
     """Filtro, apertura y cierre sinteticos -sin diario real- por comparar.py y generar_papel.py."""
     sint = trabajo / "sintetico"
@@ -249,10 +342,220 @@ def _probar_compensadas(aqui: Path, trabajo: Path, comprobar) -> None:
               and "siguen contando como diferencias" in textos)
 
 
+# Como se lee la configuracion de normalizacion: filas de Datos tal como las exporta SQL_FILTRO
+# (en cualquier orden) -> «filtro», «campo» o un trozo del motivo con que para.
+NORMALIZACIONES = [
+    ([{"Datos": "2"}], "campo"),
+    ([{"Datos": "0"}, {"Datos": "ASIENTO|Texto|Es igual a|1||| ASIENTO Es igual a 1"}], "filtro"),
+    ([{"Datos": "ASIENTO|Texto|Es igual a|1|||"}, {"Datos": "0"}], "filtro"),
+    # con filtro manda el filtro, aunque la plantilla traiga el campo APERTURA
+    ([{"Datos": "2"}, {"Datos": "CONCEPTO|Texto|Es igual a|Apertura|||"}], "filtro"),
+    ([{"Datos": "CONCEPTO|Texto|Es igual a|Apertura|||"}], "filtro"),
+    ([{"Datos": "0"}], "plantilla de DEBE y HABER y sin filtro de apertura"),
+    ([{"Datos": "1"}], "plantilla de SALDO y sin filtro de apertura"),
+    ([{"Datos": "7"}], "plantilla desconocida"),
+    ([], "CfgNormalizacion no tiene FiltroDeApertura"),
+    ([{"Datos": "2"}, {"Datos": "ASIENTO|Texto|Es igual a|1|||"},
+      {"Datos": "CONCEPTO|Texto|Es igual a|Apertura|||"}], "varias condiciones"),
+    # dos plantillas -dos normalizaciones en el mismo .smn- y ningun filtro: no se elige
+    ([{"Datos": "2"}, {"Datos": "0"}], "no se sabe cual es la del diario"),
+    # un .smn antiguo guarda la lista de campos: no es un filtro ilegible, es otro formato
+    ([{"Datos": "Cuenta-Nombre-Debe-Haber"}], "plantilla desconocida ('Cuenta-Nombre-Debe-Haber')"),
+]
+
+# El caso sintetico de la plantilla del campo de apertura: cuenta del cliente -> APERTURA. Las
+# dos 430 van a la misma cuenta de nivel, y la apertura suma cero. El cierre casa con todo.
+CAMPO_APERTURA = {"100000000": -10000.0, "170000000": -2000.0, "430000001": 6000.0,
+                  "430000002": 1500.0, "572000000": 4500.0}
+CAMPO_CIERRE = {"100": -10000.0, "170": -2000.0, "430": 7500.0, "572": 4500.0}
+
+
+def _probar_normalizacion(trabajo: Path, comprobar) -> None:
+    """leer_filtro: filtro, plantilla del campo de apertura, o para diciendo como se arregla."""
+    from lib_continuidad import describir_apertura, leer_filtro, sql_apertura
+
+    ruta = trabajo / "normalizacion.json"
+    for filas, esperado in NORMALIZACIONES:
+        ruta.write_text(json.dumps(filas), encoding="utf-8")
+        f = leer_filtro(ruta)
+        datos = [x["Datos"] for x in filas]
+        if esperado in ("filtro", "campo"):
+            comprobar("normalizacion " + str(datos) + " -> apertura por " + esperado + ": "
+                      + (describir_apertura(f) if not f.get("ausente") else str(f.get("motivo"))),
+                      not f.get("ausente") and f.get("via") == esperado)
+        else:
+            comprobar("normalizacion " + str(datos) + " para: " + str(f.get("motivo")),
+                      bool(f.get("ausente")) and esperado in str(f.get("motivo")))
+    ruta.write_text(json.dumps([{"Datos": "2"}]), encoding="utf-8")
+    f = leer_filtro(ruta)
+    comprobar("por el campo, la consulta son las lineas con APERTURA <> 0, todas POR_FILTRO",
+              sql_apertura(f).endswith("1 AS POR_FILTRO FROM Diario WHERE APERTURA <> 0"))
+    try:
+        sql_apertura(f, con_campo_apertura=False)
+        sin_columna = False
+    except RuntimeError:
+        sin_columna = True
+    comprobar("y sin la columna APERTURA no hay consulta: para", sin_columna)
+
+
+def _probar_campo_sintetico(aqui: Path, trabajo: Path, comprobar) -> None:
+    """La plantilla del campo de apertura de punta a punta, sin diario real: consulta,
+    verificar, comparar y papel; y los dos casos que tienen que pararse o avisar."""
+    sint = trabajo / "campo"
+    sint.mkdir(parents=True, exist_ok=True)
+
+    def correr(script, *argumentos):
+        return subprocess.run([sys.executable, "-I", str(aqui / script), *argumentos],
+                              capture_output=True, text=True, encoding="utf-8")
+
+    def escribir(nombre, filas):
+        (sint / nombre).write_text(json.dumps(filas), encoding="utf-8")
+        return str(sint / nombre)
+
+    filtro = escribir("filtro.json", [{"Datos": "2"}])
+    plantilla0 = escribir("filtro0.json", [{"Datos": "0"}])
+    res = correr("consulta_apertura.py", "--filtro", filtro)
+    comprobar("campo: consulta_apertura.py da la consulta por el campo APERTURA",
+              res.returncode == 0 and "WHERE APERTURA <> 0" in res.stdout)
+    res = correr("consulta_apertura.py", "--filtro", filtro, "--sin-campo-apertura")
+    comprobar("campo: sin la columna APERTURA, consulta_apertura.py para (salida "
+              + str(res.returncode) + ")", res.returncode == 2 and "APERTURA" in res.stdout)
+    res = correr("consulta_apertura.py", "--filtro", plantilla0)
+    comprobar("plantilla de DEBE y HABER sin filtro: para y dice como se arregla",
+              res.returncode == 2 and "volver a importar el diario" in res.stdout)
+
+    # como lo construye ForSampling (medido el 25/11/2026): DEBE y HABER llevan la apertura
+    def fila(cta, ap, fecha="2025-01-01", debe=None):
+        return {"FECHA": fecha, "ASIENTO": 1, "CUENTA": cta, "NOMBRE": "CUENTA " + cta,
+                "DEBE": max(ap, 0.0) if debe is None else debe, "HABER": max(-ap, 0.0),
+                "APERTURA": ap, "POR_FILTRO": 1}
+
+    buena = escribir("apertura.json", [fila(c, a) for c, a in CAMPO_APERTURA.items()])
+    cierre = escribir("cierre.json", [{"Cuenta": c, "Nombre": "Cuenta " + c,
+                                       "SaldoAuditoria": format(s, ".4f").replace(".", ",")}
+                                      for c, s in CAMPO_CIERRE.items()])
+    comunes = ["--cierre", cierre, "--ejercicio", "2025", "--ejercicio-anterior", "2024",
+               "--cliente", "CLIENTE SINTETICO"]
+    res = correr("verificar_contrato.py", "--filtro", filtro, "--apertura", buena, *comunes)
+    comprobar("campo: el contrato se verifica, con C06 cruzando APERTURA y DEBE - HABER (salida "
+              + str(res.returncode) + ")",
+              res.returncode == 0 and "C06 · el campo APERTURA coincide con DEBE - HABER" in res.stdout)
+    salida = sint / "resultado.json"
+    res = correr("comparar.py", "--filtro", filtro, "--apertura", buena, "--salida", str(salida),
+                 *comunes)
+    comprobar("campo: comparar.py termina bien", res.returncode == 0)
+    if res.returncode != 0:
+        print(res.stdout + res.stderr)
+        return
+    datos = json.loads(salida.read_text(encoding="utf-8"))
+    fila_430 = next((f for f in datos["filas"] if f["cuenta"] == "430"), {})
+    comprobar("campo: sin hallazgos, la apertura cuadra y la 430 agrega las dos del cliente",
+              not datos["hallazgos"] and abs(datos["cuadre"]["sin_explicar"]) < 0.005
+              and fila_430.get("cuentas_cliente") == 2 and fila_430.get("apertura") == 7500.0)
+    comprobar("campo: el resultado dice por donde se identifico la apertura",
+              datos["meta"]["via_apertura"] == "campo" and "campo APERTURA" in res.stdout)
+    papel = sint / "papel.xlsx"
+    res = correr("generar_papel.py", "--resultado", str(salida), "--fecha-cierre", "31/12/24",
+                 "--generado", "25/11/2026", "--salida", str(papel))
+    comprobar("campo: generar_papel.py termina bien", res.returncode == 0)
+    if res.returncode == 0:
+        import openpyxl
+
+        from lib_uso_ia import HOJA
+
+        textos = " ".join(str(c.value) for f in openpyxl.load_workbook(papel)[HOJA].iter_rows()
+                          for c in f if c.value)
+        comprobar("campo: la hoja «Uso de IA» dice que la apertura salio del campo APERTURA",
+                  "identificado por el campo APERTURA" in textos
+                  and "filtro de normalización del diario (" not in textos)
+
+    # un APERTURA que no casa con DEBE - HABER: la prueba tomaria otra apertura, y se para
+    mala = escribir("apertura_mala.json", [fila(c, a, debe=4400.0 if c == "572000000" else None)
+                                           for c, a in CAMPO_APERTURA.items()])
+    res = correr("verificar_contrato.py", "--filtro", filtro, "--apertura", mala, *comunes)
+    comprobar("campo: APERTURA distinto de DEBE - HABER -> verificar_contrato.py para por C06",
+              res.returncode == 2 and "no coincide con DEBE - HABER" in res.stdout
+              and "572000000" in res.stdout)
+    res = correr("comparar.py", "--filtro", filtro, "--apertura", mala,
+                 "--salida", str(sint / "resultado_malo.json"), *comunes)
+    comprobar("campo: y comparar.py tampoco da resultado", res.returncode == 2)
+    # repartida en dos fechas: se sigue, pero avisando
+    dos = escribir("apertura_dos_fechas.json",
+                   [fila(c, a, fecha="2025-01-02" if c == "170000000" else "2025-01-01")
+                    for c, a in CAMPO_APERTURA.items()])
+    res = correr("verificar_contrato.py", "--filtro", filtro, "--apertura", dos, *comunes)
+    comprobar("campo: apertura repartida en dos fechas -> aviso, no parada (salida "
+              + str(res.returncode) + ")", res.returncode == 1 and "repartidas en" in res.stdout)
+
+
+def _probar_campo_real(aqui: Path, diario: Path, args, trabajo: Path, comprobar) -> None:
+    """Calibracion contra un diario REAL de la plantilla del campo de apertura: por las mismas
+    consultas que el MCP, la apertura por el campo tiene que dar cuenta a cuenta lo mismo que
+    un filtro por su asiento sobre el mismo diario, y la prueba tiene que llegar al papel."""
+    from lib_continuidad import (SQL_FILTRO, cargar_apertura, interpretar_filtro, leer_filtro,
+                                 saldos_apertura, sql_apertura)
+
+    ruta_filtro = trabajo / "campo_real_filtro.json"
+    ruta_filtro.write_text(json.dumps(consultar(diario, SQL_FILTRO), ensure_ascii=False),
+                           encoding="utf-8")
+    filtro = leer_filtro(ruta_filtro)
+    comprobar("diario real de la plantilla del campo de apertura: se identifica por el campo ("
+              + str(filtro.get("motivo") or filtro.get("crudo")) + ")", filtro.get("via") == "campo")
+    if filtro.get("via") != "campo":
+        return
+    ruta_ap = trabajo / "campo_real_apertura.json"
+    ruta_ap.write_text(json.dumps(consultar(diario, sql_apertura(filtro)), ensure_ascii=False),
+                       encoding="utf-8")
+    por_campo = cargar_apertura(ruta_ap)
+    n_campo = int(consultar(diario, "SELECT Count(*) AS N FROM Diario WHERE APERTURA <> 0")[0]["N"])
+    comprobar("exporta las " + str(n_campo) + " lineas con APERTURA <> 0, y nada mas",
+              len(por_campo) == n_campo)
+    asientos = sorted(por_campo["ASIENTO"].drop_duplicates().tolist())
+    comprobar("todas en un asiento (" + str(asientos) + ")", len(asientos) == 1)
+    if len(asientos) != 1:
+        return
+    # el mismo diario, con un filtro por ese asiento: mismo saldo cuenta a cuenta. El asiento
+    # puede traer lineas a cero que el campo no marca; no cambian ningun saldo.
+    por_asiento = trabajo / "campo_real_por_asiento.json"
+    f_asiento = interpretar_filtro("ASIENTO|Texto|Es igual a|" + asientos[0] + "|||")
+    por_asiento.write_text(json.dumps(consultar(diario, sql_apertura(f_asiento)), ensure_ascii=False),
+                           encoding="utf-8")
+    df_asiento = cargar_apertura(por_asiento)
+    s_campo = saldos_apertura(por_campo, por_campo["POR_FILTRO"])
+    s_asiento = saldos_apertura(df_asiento, df_asiento["POR_FILTRO"])
+    s_asiento = s_asiento[s_asiento["SALDO_AP"].abs() >= 0.005]
+    iguales = dict(zip(s_campo["CUENTA"], s_campo["SALDO_AP"])) == dict(zip(s_asiento["CUENTA"],
+                                                                            s_asiento["SALDO_AP"]))
+    comprobar("y da cuenta a cuenta lo mismo que el filtro por el asiento " + asientos[0] + " ("
+              + str(len(s_campo)) + " cuentas)", iguales)
+
+    comunes = ["--filtro", str(ruta_filtro), "--apertura", str(ruta_ap), "--cierre", args.cierre,
+               "--ejercicio", args.ejercicio, "--ejercicio-anterior", args.ejercicio_anterior,
+               "--cliente", "CLIENTE DE PRUEBA"]
+    res = subprocess.run([sys.executable, "-I", str(aqui / "verificar_contrato.py"), *comunes],
+                         capture_output=True, text=True, encoding="utf-8")
+    comprobar("verificar_contrato.py lo da por bueno, con C06 por el campo (salida "
+              + str(res.returncode) + ")", res.returncode in (0, 1)
+              and "C06 · el campo APERTURA coincide con DEBE - HABER" in res.stdout)
+    salida = trabajo / "resultado_campo_real.json"
+    res = subprocess.run([sys.executable, "-I", str(aqui / "comparar.py"), *comunes,
+                          "--salida", str(salida)], capture_output=True, text=True, encoding="utf-8")
+    comprobar("comparar.py llega al resultado", res.returncode == 0)
+    if res.returncode == 0:
+        datos = json.loads(salida.read_text(encoding="utf-8"))
+        comprobar("con el cuadre explicado entero (sin explicar "
+                  + format(datos["cuadre"]["sin_explicar"], ".2f") + ")",
+                  abs(datos["cuadre"]["sin_explicar"]) < 0.005)
+        print("    (con el cierre dado salen " + str(len(datos["hallazgos"])) + " hallazgos: "
+              "dependen de que ese diario sea el del expediente, no del skill)")
+
+
 def main() -> int:
     salida_utf8()
     p = argparse.ArgumentParser()
     p.add_argument("--diario", required=True, help="un .smn real, no se modifica")
+    p.add_argument("--diario-campo", default="",
+                   help="un .smn real de la plantilla del campo de apertura, no se modifica")
     p.add_argument("--cierre", required=True)
     p.add_argument("--trabajo", default="trabajo_prueba")
     # el cierre que exporta el MCP son filas crudas, sin ejercicios: hay que decirlos
@@ -287,6 +590,8 @@ def main() -> int:
     comprobar("filtro " + filtro["campo"] + " " + filtro["operador"] + " " + repr(filtro["valor"])
               + ": JET y pandas seleccionan los mismos apuntes (" + str(int(m_pandas.sum())) + ")",
               int(m_pandas.sum()) == len(sel) and abs(neto_pandas - neto_jet) < 0.005)
+    _probar_filtros(comprobar)
+    _probar_operadores(real, trabajo, filtro, comprobar)
     columnas = set(df_ap.columns)
     comprobar("la apertura exportada lleva solo las columnas de la prueba: "
               + ", ".join(sorted(columnas)),
@@ -391,7 +696,17 @@ def main() -> int:
     # 4 · Diferencias que se compensan, con un caso SINTETICO de punta a punta
     _probar_compensadas(aqui, trabajo, comprobar)
 
-    # 5 · El SKILL.md: huecos en vez de años fijos, y el borrado con la ruta literal
+    # 5 · La plantilla del campo de apertura (25/11/2026): sin FiltroDeApertura el skill se
+    # paraba con diarios que si dicen cual es su apertura
+    _probar_normalizacion(trabajo, comprobar)
+    _probar_campo_sintetico(aqui, trabajo, comprobar)
+    if args.diario_campo:
+        _probar_campo_real(aqui, Path(args.diario_campo), args, trabajo, comprobar)
+    else:
+        print("    (sin --diario-campo: falta la calibracion con un diario real de la plantilla "
+              "del campo de apertura)")
+
+    # 6 · El SKILL.md: huecos en vez de años fijos, y el borrado con la ruta literal
     # (registro del 21/10/2026: el expediente probado era de 2024 y los ejemplos decian 2025;
     # y en Cowork la variable no llega a la orden de borrado y `$(cat …)` lo bloquea)
     import re

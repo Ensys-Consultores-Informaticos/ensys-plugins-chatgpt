@@ -30,10 +30,17 @@ auditado.
 ## Cinco reglas que gobiernan todo
 
 **1. El asiento de apertura no se adivina.** Se fija al normalizar el diario y no
-tiene que ser el número 1 —en el expediente de calibración era el 3495—. Vive en la tabla
-`CfgNormalizacion` del `.smn`, en el registro `FiltroDeApertura`. Si ese filtro
-no se puede leer o trae un operador desconocido, **el skill para**. Elegir el
-asiento por intuición da un resultado plausible y falso.
+tiene que ser el número 1 —en el expediente de calibración era el 3495—. Se define de una
+de dos maneras, y las dos están en la tabla `CfgNormalizacion` del `.smn`:
+
+- con un **filtro de apertura** (el registro `FiltroDeApertura`), en los diarios
+  normalizados con las plantillas de DEBE y HABER o de SALDO;
+- con la **plantilla del campo de apertura** (CUENTA, NOMBRE, APERTURA, DEBESA, HABERSA…),
+  que no lleva filtro: la apertura son las líneas con el campo `APERTURA` distinto de cero.
+
+Si hay filtro, manda el filtro. Si no hay ninguna de las dos, o el filtro trae algo que el
+skill no traduce, **el skill para** y dice cómo se arregla. Elegir el asiento por intuición
+da un resultado plausible y falso.
 
 **2. La comparación va al nivel de auditoría del expediente que se audita,** no
 al del papel del año pasado ni al desglose del cliente. Y ese nivel **no es un
@@ -164,18 +171,23 @@ exportar_consulta(
 `<anterior>` es el `CodigoAuditoria` del ejercicio anterior, de la tabla del paso 1: un
 orden interno, **no un año**, así que no lo calcules sumando uno.
 
-**2b · El filtro de apertura**, del diario. Esta consulta, **tal cual**:
+**2b · El filtro de apertura y la plantilla**, del diario. Esta consulta, **tal cual** —trae
+el `FiltroDeApertura` si lo hay y la plantilla con que se normalizó el diario, y el script
+distingue las dos filas—:
 
 ```
 exportar_consulta(
   fuente = "diario",
-  sql = "SELECT Datos FROM CfgNormalizacion WHERE Trim(Concepto) = 'FiltroDeApertura'",
+  sql = "SELECT Datos FROM CfgNormalizacion WHERE Trim(Concepto) = 'FiltroDeApertura' OR Concepto LIKE 'Configuraci%campos'",
   ruta = "<EXPORT>/filtro.json")
 ```
 
+Lo normal es que escriba una o dos filas. **Cero filas no es un error tuyo**: es un diario
+sin configuración de normalización, y el script lo dirá en el paso siguiente.
+
 **2c · La consulta del asiento de apertura**, que no se escribe a mano: la da el script a
-partir del filtro. Mira antes si el diario trae el campo `APERTURA`, que es una opción de
-importación:
+partir del filtro o, si el diario se normalizó con la plantilla del campo de apertura, de ese
+campo. Mira antes si el diario trae el campo `APERTURA`, que es una opción de importación:
 
 ```
 columnas(fuente = "diario", tabla = "Diario")
@@ -187,8 +199,11 @@ python "<PLUGIN>\skills\continuidad-saldos\scripts\consulta_apertura.py" --filtr
 python "<PLUGIN>\skills\continuidad-saldos\scripts\consulta_apertura.py" --filtro "<TRABAJO>/filtro.json" --sin-campo-apertura
 ```
 
-Salida `2` → **para**: el filtro no se puede leer o trae un operador desconocido, y el asiento
-de apertura no se adivina. Salida `0` → imprime una línea `SQL: …`.
+Salida `2` → **para**: la apertura no se puede identificar —no hay filtro ni plantilla del
+campo de apertura, o el filtro trae algo que no se traduce—, y el asiento de apertura no se
+adivina. **Cuéntale al auditor el mensaje tal cual**, que dice cómo se arregla: es en la
+normalización del diario, no en este skill. Salida `0` → imprime una línea `C02 · apertura
+por …`, que dice cómo se ha identificado, y una línea `SQL: …`.
 
 **2d · El asiento de apertura**, con **esa consulta copiada exactamente**, sin quitarle ni
 añadirle nada:
@@ -218,6 +233,12 @@ Salida `2` → **para**, no se genera nada. Salida `1` son avisos: léelos y
 que más importan: que el campo `APERTURA` no coincida con el filtro (suele
 significar que el filtro se cambió después de importar) y que la apertura traiga
 cuentas de los grupos 6 y 7.
+
+Con la plantilla del campo de apertura no hay filtro con el que cruzar el campo, y C06
+comprueba otra cosa: que `APERTURA` sea igual a Debe − Haber en cada línea de la apertura,
+que es como ForSampling construye esos diarios. Si no lo es, **para**: la prueba leería una
+apertura que no es la del campo. Y si la apertura sale repartida en varios asientos o fechas,
+avisa.
 
 ### Paso 4 — Comparar
 
@@ -377,10 +398,12 @@ de su cliente.
 | Situación | Qué sale |
 |---|---|
 | Sin diario importado | **para.** No hay apertura que comparar |
-| Sin `CfgNormalizacion` o sin `FiltroDeApertura` | **para.** El asiento de apertura no se adivina |
-| Operador de filtro desconocido | **para**, y dice cuál era |
+| Sin `FiltroDeApertura`, con la plantilla del campo de apertura | sigue: la apertura son las líneas con `APERTURA` distinto de cero, y C06 comprueba que es igual a Debe − Haber |
+| Sin `FiltroDeApertura` y con otra plantilla, o sin `CfgNormalizacion` | **para**, y dice cómo se arregla: definir la apertura al normalizar el diario y volver a importarlo. El asiento de apertura no se adivina |
+| Plantilla del campo de apertura, pero `APERTURA` distinto de Debe − Haber | **para.** La prueba leería otra apertura |
+| Filtro que no se traduce: operador desconocido, «Rango», «Es», un comparador (`>`, `<`…), `<nulo>`, campo de tipo Fecha o varias condiciones encadenadas | **para**, y dice cuál era. Se traducen «Es igual a», «Es distinto a», «Comienza por», «Contiene», «Finaliza por» y «No contiene» |
 | La apertura no cuadra | **para.** Con la apertura descuadrada la prueba no significa nada |
-| Campo `APERTURA` inexistente | `consulta_apertura.py --sin-campo-apertura`; sigue con el filtro y avisa de que pierde la comprobación cruzada |
+| Campo `APERTURA` inexistente | `consulta_apertura.py --sin-campo-apertura`; sigue con el filtro y avisa de que pierde la comprobación cruzada. Con la plantilla del campo de apertura, **para** |
 | Expediente con un solo ejercicio | **para.** No hay cierre anterior |
 | Cuentas abiertas sin destino en el expediente | sigue, y las emite como hallazgo `cuenta_nueva` |
 | La apertura de balance no cuadra | sigue, y el papel lo avisa arriba con el desglose |
